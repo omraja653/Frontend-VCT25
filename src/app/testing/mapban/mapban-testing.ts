@@ -57,9 +57,29 @@ import { Rive } from "@rive-app/canvas";
             Cycle Sponsor
           </button>
         </div>
+        
+        <!-- Color Controls Section -->
+        <div class="color-controls">
+          <label>Mapban Colors:</label>
+          <div class="color-inputs">
+            <div>
+              <label>Primary Color:</label>
+              <input type="color" #primaryColorInput value="#80152D" (change)="updateMapbanColors(primaryColorInput.value, secondaryColorInput.value)">
+              <span>{{getHexDisplay(mapbanColors.primaryColor)}}</span>
+            </div>
+            <div>
+              <label>Secondary Color:</label>
+              <input type="color" #secondaryColorInput value="#1C8C74" (change)="updateMapbanColors(primaryColorInput.value, secondaryColorInput.value)">
+              <span>{{getHexDisplay(mapbanColors.secondaryColor)}}</span>
+            </div>
+          </div>
+          <button (click)="resetColors()">Reset Colors</button>
+        </div>
         <button (click)="reset()">Reset</button>
         <button (click)="updateRiveAssets()">Update Animation</button>
         <button (click)="debugInputs()">Debug Inputs</button>
+        <button (click)="testColors()">Test Colors</button>
+        <button (click)="forceRefreshColors()">Force Refresh Colors</button>
       </div>
       <div class="rive-container">
         <canvas #riveCanvas></canvas>
@@ -121,6 +141,12 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
   // Add preloading state tracking
   private preloadedAssets: Map<string, Uint8Array> = new Map();
   private isPreloadingComplete = false;
+
+  // Color configuration for data binding
+  mapbanColors = {
+    primaryColor: 0x80152D,    // Red/Attacking team color (hex: #80152D)
+    secondaryColor: 0x1C8C74   // Green/Defending team color (hex: #1C8C74)
+  };
 
   constructor(private riveService: RiveMapbanService) {
     this.initializeSelectedMaps();
@@ -223,6 +249,9 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
       // Set up team information in the service
       this.riveService.setTeamInfo(0, this.teams[0]);
       this.riveService.setTeamInfo(1, this.teams[1]);
+      
+      // Set initial mapban colors using direct Rive access
+      this.setColorsDirectlyOnRive(0x80152D, 0x1C8C74);
       
       // Execute the BO3 scenario immediately before animation starts
       this.executeFullBO3Immediately();
@@ -895,6 +924,9 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
       bansTriggered: false
     };
     
+    // Reset colors to default
+    this.resetColors();
+    
     // Reset Rive states
     this.riveService.resetMapStates();
     this.riveService.updateSponsorInfo(this.mockMatch.tools.sponsorInfo);
@@ -927,6 +959,75 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
     this.riveService.updateAssetsFromPreloaded(assets, this.preloadedAssets);
   }
 
+  /**
+   * Update mapban colors - simplified direct approach
+   */
+  updateMapbanColors(primaryColor?: string, secondaryColor?: string): void {
+    console.log('🎨 updateMapbanColors called with:', { primaryColor, secondaryColor });
+    
+    // Use hex values directly without conversion
+    let primaryHex = 0x80152D;   // Default primary color
+    let secondaryHex = 0x1C8C74; // Default secondary color
+    
+    // Only convert if string values are provided (from color picker)
+    if (primaryColor) {
+      primaryHex = parseInt(primaryColor.replace('#', ''), 16);
+    }
+    if (secondaryColor) {
+      secondaryHex = parseInt(secondaryColor.replace('#', ''), 16);
+    }
+    
+    console.log('🎨 Setting colors:', { 
+      primaryHex: `0x${primaryHex.toString(16).toUpperCase()}`, 
+      secondaryHex: `0x${secondaryHex.toString(16).toUpperCase()}`
+    });
+    
+    // Update stored values
+    this.mapbanColors.primaryColor = primaryHex;
+    this.mapbanColors.secondaryColor = secondaryHex;
+    
+    // Set colors directly on Rive viewModelInstance (like agent select component)
+    this.setColorsDirectlyOnRive(primaryHex, secondaryHex);
+  }
+
+  /**
+   * Set colors directly on Rive viewModelInstance (same pattern as agent select)
+   */
+  private setColorsDirectlyOnRive(primaryColor: number, secondaryColor: number): void {
+    const rive = this.riveService.getRive();
+    if (!rive) {
+      console.warn('Cannot set colors - Rive not available');
+      return;
+    }
+
+    try {
+      const viewModelInstance = rive.viewModelInstance;
+      if (viewModelInstance) {
+        // Access color properties directly (try different property names)
+        const primaryColorProperty = viewModelInstance.color('mapbanPrimaryColor') || viewModelInstance.color('primaryColor');
+        const secondaryColorProperty = viewModelInstance.color('mapbanSecondaryColor') || viewModelInstance.color('secondaryColor');
+        
+        if (primaryColorProperty) {
+          primaryColorProperty.value = primaryColor;
+          console.log(`✅ Set primary color: 0x${primaryColor.toString(16).toUpperCase()}`);
+        } else {
+          console.warn('❌ Primary color property not found');
+        }
+        
+        if (secondaryColorProperty) {
+          secondaryColorProperty.value = secondaryColor;
+          console.log(`✅ Set secondary color: 0x${secondaryColor.toString(16).toUpperCase()}`);
+        } else {
+          console.warn('❌ Secondary color property not found');
+        }
+      } else {
+        console.warn('❌ ViewModelInstance not available');
+      }
+    } catch (error) {
+      console.error('❌ Error setting colors directly:', error);
+    }
+  }
+
   toggleSponsors() {
     this.mockMatch.tools.sponsorInfo.enabled = !this.mockMatch.tools.sponsorInfo.enabled;
     this.riveService.updateSponsorInfo(this.mockMatch.tools.sponsorInfo);
@@ -946,6 +1047,7 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
     this.riveService.debugListInputs();
     console.log('Current states:', this.riveService.getCurrentStates());
     console.log('Selected maps:', this.selectedMaps);
+    console.log('Mapban colors:', this.mapbanColors);
     console.log('======================');
   }
 
@@ -985,20 +1087,20 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   private updateSideSelectionImmediate(mapName: string, team: number, side: 'ATTACK' | 'DEFENSE'): void {
-    // Find the picked map and update side information
+    // Find the map and update side information
     const selectedMap = this.selectedMaps.find(m => m.name === mapName);
-    if (selectedMap && (selectedMap.pickedBy !== undefined || selectedMap.name === mapName)) {
+    if (selectedMap && selectedMap.name === mapName) {
       // Update the stored side information
       selectedMap.pickedAttack = side === 'ATTACK';
       selectedMap.sidePickedBy = team as 0 | 1;
       
       const mapSlot = this.selectedMaps.findIndex(m => m.name === mapName) + 1;
       
-      // Update veto text immediately for side selection
-      this.riveService.updateVetoText(mapSlot, 'SELECT', team);
-      
-      // Update pick text with side selection immediately
+      // DO NOT change the veto text - it should remain "DECIDER MAP" for decider maps
+      // Only update the pick text with side selection
       this.riveService.updatePickText(team, side, `Pick ${mapSlot}`);
+      
+      console.log(`Side selection updated for ${mapName}: Team ${team} picks ${side}`);
     }
   }
 
@@ -1007,7 +1109,7 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
     setTimeout(() => {
       console.log('🎬 Triggering PICK animations at 1.36s');
       this.triggerPickAnimations();
-    }, 1360);
+    }, 1600);
     
     // Schedule ban animations at 2.36 seconds  
     setTimeout(() => {
@@ -1071,5 +1173,73 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
     } else {
       console.warn(`❌ Map asset not preloaded: ${mapImageUrl}`);
     }
+  }
+
+  /**
+   * Get hex display string for a color number
+   */
+  getHexDisplay(colorValue: number): string {
+    return `#${colorValue.toString(16).toUpperCase().padStart(6, '0')}`;
+  }
+
+  /**
+   * Reset colors to default values - using hex directly
+   */
+  resetColors(): void {
+    // Set to default hex values directly
+    this.mapbanColors.primaryColor = 0x80152D;
+    this.mapbanColors.secondaryColor = 0x1C8C74;
+    
+    // Set directly on Rive
+    this.setColorsDirectlyOnRive(0x80152D, 0x1C8C74);
+  }
+
+  /**
+   * Test color setting specifically - using hex values directly
+   */
+  testColors(): void {
+    console.log('🧪 Testing color functionality...');
+    
+    // Use hex values directly (no conversion)
+    const testPrimary = 0xFF0000; // Bright red
+    const testSecondary = 0x00FF00; // Bright green
+    
+    console.log(`🧪 Setting test colors: primary=0x${testPrimary.toString(16)}, secondary=0x${testSecondary.toString(16)}`);
+    
+    // Update stored values
+    this.mapbanColors.primaryColor = testPrimary;
+    this.mapbanColors.secondaryColor = testSecondary;
+    
+    // Set directly on Rive
+    this.setColorsDirectlyOnRive(testPrimary, testSecondary);
+    
+    // Update UI color inputs
+    setTimeout(() => {
+      const primaryInput = document.querySelector('input[type="color"]') as HTMLInputElement;
+      const secondaryInput = document.querySelectorAll('input[type="color"]')[1] as HTMLInputElement;
+      
+      if (primaryInput) {
+        primaryInput.value = '#FF0000';
+      }
+      if (secondaryInput) {
+        secondaryInput.value = '#00FF00';
+      }
+    }, 100);
+  }
+
+  /**
+   * Force refresh colors - using hex values directly
+   */
+  forceRefreshColors(): void {
+    console.log('🔄 Force refreshing colors...');
+    
+    // Use stored hex values directly
+    const currentPrimary = this.mapbanColors.primaryColor;
+    const currentSecondary = this.mapbanColors.secondaryColor;
+    
+    console.log(`🔄 Current stored colors: primary=0x${currentPrimary.toString(16).toUpperCase()}, secondary=0x${currentSecondary.toString(16).toUpperCase()}`);
+    
+    // Set directly on Rive
+    this.setColorsDirectlyOnRive(currentPrimary, currentSecondary);
   }
 }

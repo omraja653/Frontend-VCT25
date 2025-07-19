@@ -73,7 +73,7 @@ export class PlayerControllerComponent implements OnDestroy {
     scoreboardAvailable: true,
     auxiliaryAvailable: {
       health: true,
-      abilities: true,
+      abilities: false,
       scoreboard: true,
     },
     kills: 0,

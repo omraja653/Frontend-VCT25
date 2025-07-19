@@ -214,8 +214,22 @@ export class TestingComponent implements AfterViewInit {
   }
 
   detonateDefuseSpike(): void {
-    this.matchData.spikeState = { planted: false, detonated: false, defused: false };
-    this.isSpikePlanted = false;
+    // Randomly choose between defuse and detonate for testing
+    const isDefused = Math.random() > 0.5;
+    
+    if (isDefused) {
+      this.matchData.spikeState = { planted: true, detonated: false, defused: true };
+    } else {
+      this.matchData.spikeState = { planted: true, detonated: true, defused: false };
+    }
+    
+    // After animation time, reset the spike state
+    setTimeout(() => {
+      this.matchData.spikeState = { planted: false, detonated: false, defused: false };
+      this.isSpikePlanted = false;
+      this.pushUpdatesToTracker();
+    }, 1000); // Wait for animation to complete
+    
     this.pushUpdatesToTracker();
   }
 

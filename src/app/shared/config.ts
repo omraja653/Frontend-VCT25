@@ -14,6 +14,9 @@ export class Config {
   defenderColorSecondary = "#46F4CF";
   defenderColorShieldCurrency = "#46F4CF";
 
+  mapbanPrimaryColor = "#80152D";
+  mapbanSecondaryColor = "#1C8C74";
+
   showEventName = false;
   eventName = "Spectra Invitational 2025";
 
