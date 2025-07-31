@@ -31,19 +31,15 @@ export interface MapState {
 }
 
 export interface MapbanFsAssets {
-  team1_logo?: string;
-  team2_logo?: string;
-  t1_logo?: string;
-  t2_logo?: string;
-  sponsor?: string;
-  eventLogo?: string;
-  map_0?: string;
-  map_1?: string;
+  team1Logo?: string;  // Team 1 logo for past maps
+  team2Logo?: string;  // Team 2 logo for past maps
+  map_1?: string;      // Map images for maps 1-7
   map_2?: string;
   map_3?: string;
   map_4?: string;
   map_5?: string;
   map_6?: string;
+  map_7?: string;
 }
 
 export interface SponsorInfo {
@@ -137,6 +133,8 @@ export class RiveMapbanFsService {
         const assetName = asset.name;
         const assetUrl = assets[assetName as keyof MapbanFsAssets];
         
+        console.log(`🔍 Asset loader called for: '${assetName}' -> URL: ${assetUrl}`);
+        
         // Store the asset reference for later dynamic updates
         this.assetReferences.set(assetName, asset);
         
@@ -178,7 +176,7 @@ export class RiveMapbanFsService {
           fit: Fit.Cover,
           alignment: Alignment.Center,
         }),
-        autoplay: true,
+        autoplay: false, // Disable autoplay - we'll start manually after data is loaded
         assetLoader: assetLoader,
         onLoad: () => {
           console.log('✅ Rive mapban-fs loaded successfully');
@@ -186,16 +184,10 @@ export class RiveMapbanFsService {
           // Set initial artboard
           this.setArtboard(this.currentArtboardName);
           
-          // Debug: Check if animation is playing
           if (this.rive) {
             console.log('🎬 Rive instance created successfully');
             console.log('📊 Rive playback state:', this.rive.isPlaying);
-            
-            // Ensure animation is playing
-            if (!this.rive.isPlaying) {
-              this.rive.play();
-              console.log('▶️ Started Rive animation playback');
-            }
+            console.log('⏸️ Animation ready but not started (waiting for data)');
             
             resolve(this.rive);
           } else {
@@ -240,114 +232,63 @@ export class RiveMapbanFsService {
       return;
     }
 
-    // Calculate delay in milliseconds based on frames
     const delayMs = delayFrames * this.FRAME_DURATION_MS;
 
-    // Apply the delay
     setTimeout(() => {
       try {
-        if (this.rive) {
-          // For data binding, we need to use the view model system
-          let viewModel = null;
-          try {
-            viewModel = this.rive.viewModelByName('Default');
-          } catch (error) {
-            console.warn(`View model 'Default' not found, trying default view model:`, error);
-            try {
-              viewModel = this.rive.defaultViewModel();
-            } catch (defaultError) {
-              console.warn(`Default view model not found:`, defaultError);
-              return;
-            }
-          }
+        if (!this.rive) return;
 
-          if (viewModel) {
-            let viewModelInstance = null;
-            try {
-              viewModelInstance = viewModel.defaultInstance();
-              if (viewModelInstance && !this.rive.viewModelInstance) {
-                this.rive.bindViewModelInstance(viewModelInstance);
-              } else if (this.rive.viewModelInstance) {
-                viewModelInstance = this.rive.viewModelInstance;
-              }
-            } catch (error) {
-              console.warn(`Could not get view model instance:`, error);
-              return;
-            }
+        // Get the 'Default' view model from the Rive instance
+        const viewModel = this.rive.viewModelByName('Default');
+        if (!viewModel) {
+          console.warn("View model 'Default' not found");
+          return;
+        }
 
-            if (viewModelInstance) {
-              try {
-                if ((inputName === 'team' || inputName === 'team1Logo' || inputName === 'team2Logo') && typeof value === 'string') {
-                  // For team input (image), we need to find the correct asset reference based on the value
-                  let assetRef = null;
-                  
-                  if (value === 'team1Logo') {
-                    // Look for team1_logo asset reference
-                    assetRef = this.assetReferences.get('team1_logo');
-                  } else if (value === 'team2Logo') {
-                    // Look for team2_logo asset reference
-                    assetRef = this.assetReferences.get('team2_logo');
-                  } else {
-                    // Fallback to direct asset reference lookup
-                    assetRef = this.assetReferences.get(value);
-                  }
-                  
-                  if (assetRef) {
-                    // Try to find the input property and set it
-                    const teamInput = viewModelInstance.image ? viewModelInstance.image(inputName) : null;
-                    if (teamInput) {
-                      teamInput.value = assetRef;
-                      console.log(`✅ Set data binding input '${inputName}' to asset reference for: ${value} (delayed by ${delayFrames} frames)`);
-                    } else {
-                      console.warn(`Image input '${inputName}' not found in view model instance`);
-                    }
-                  } else {
-                    console.warn(`Asset reference not found for '${inputName}': ${value} (looking for asset references: ${Array.from(this.assetReferences.keys()).join(', ')})`);
-                  }
-                } else if ((inputName === 'pastMap' || inputName.startsWith('pastMap')) && typeof value === 'boolean') {
-                  // For pastMap inputs (boolean) - handles both 'pastMap' and 'pastMap3', 'pastMap4', etc.
-                  const boolInput = viewModelInstance.boolean ? viewModelInstance.boolean(inputName) : null;
-                  if (boolInput) {
-                    boolInput.value = value;
-                    console.log(`✅ Set data binding input '${inputName}' to: ${value} (delayed by ${delayFrames} frames)`);
-                  } else {
-                    console.warn(`Boolean input '${inputName}' not found in view model instance`);
-                  }
-                } else {
-                  console.warn(`Unsupported input type for '${inputName}': ${typeof value}`);
-                }
-              } catch (inputError) {
-                console.error(`Error setting input '${inputName}':`, inputError);
-              }
+        // Get or create a view model instance and bind it
+        let viewModelInstance = this.rive.viewModelInstance;
+        if (!viewModelInstance) {
+          viewModelInstance = viewModel.defaultInstance();
+          this.rive.bindViewModelInstance(viewModelInstance);
+        }
+        
+        if (!viewModelInstance) {
+          console.warn('Could not get or create view model instance');
+          return;
+        }
+
+        // Handle nested image inputs via path (e.g., "MAP 5 SCORE/team")
+        if (inputName.includes('/') && typeof value === 'string') {
+          const property = viewModelInstance.image(inputName);
+          if (property) {
+            const assetRef = this.assetReferences.get(value);
+            if (assetRef) {
+              property.value = assetRef;
+              console.log(`✅ Set nested image property '${inputName}' to asset: ${value}`);
             } else {
-              console.warn(`View model instance not available for input '${inputName}'`);
+              console.warn(`Asset reference not found for '${value}'`);
             }
           } else {
-            console.warn(`View model not found for input '${inputName}'`);
+            console.warn(`Image property not found at path: '${inputName}'`);
           }
+        }
+        // Handle top-level boolean inputs (e.g., "pastMap5")
+        else if (inputName.startsWith('pastMap') && typeof value === 'boolean') {
+          const boolInput = viewModelInstance.boolean(inputName);
+          if (boolInput) {
+            boolInput.value = value;
+            console.log(`✅ Set boolean input '${inputName}' to: ${value}`);
+          } else {
+            console.warn(`Boolean input '${inputName}' not found`);
+          }
+        }
+        else {
+          console.warn(`Unsupported input type or format for '${inputName}': ${typeof value}`);
         }
       } catch (error) {
         console.error(`Error setting data binding input '${inputName}':`, error);
       }
     }, delayMs);
-  }
-
-  setNestedArtboardInput(artboardName: string, inputName: string, value: any, delayFrames: number = 0): void {
-    if (!this.rive) {
-      console.error('Rive not initialized');
-      return;
-    }
-
-    try {
-      // For nested artboards, we'll use the main data binding approach
-      // The delay functionality is now handled in the Rive editor itself
-      console.log(`🎯 Setting nested artboard '${artboardName}' input '${inputName}' to: ${value}`);
-      
-      // Delegate to the main data binding input method (no delay since it's handled in Rive)
-      this.setDataBindingInput(inputName, value, 0);
-    } catch (error) {
-      console.error(`Error setting nested artboard input '${artboardName}.${inputName}':`, error);
-    }
   }
 
   updateMapStates(mapStates: MapState[], teams?: any[]): void {
@@ -414,8 +355,9 @@ export class RiveMapbanFsService {
             // Set the score text run on the nested artboard
             this.setNestedTextRun('Score', scoreText, artboardName);
             
-            // Set the "team" input to control which team logo to show
-            this.setNestedArtboardInput(artboardName, 'team', winningTeam, 0);
+            // Set the "team" input to control which team logo to show on the nested artboard
+            const teamInputPath = `${artboardName}/team`;
+            this.setDataBindingInput(teamInputPath, winningTeam, 0);
             
             console.log(`✅ Set score "${scoreText}" and team selector to "${winningTeam}" for ${artboardName}`);
           }
@@ -701,7 +643,8 @@ export class RiveMapbanFsService {
         this.setNestedTextRun('Score', scoreText, artboardName);
         
         // Set the "team" input to control which team logo to show
-        this.setNestedArtboardInput(artboardName, 'team', winningTeam, 0);
+        const teamInputPath = `${artboardName}/team`;
+        this.setDataBindingInput(teamInputPath, winningTeam, 0);
         
         console.log(`✅ Set ${pastMapInputName} = true, score = "${scoreText}", and team selector = "${winningTeam}" for ${artboardName}`);
       } else {
@@ -724,6 +667,32 @@ export class RiveMapbanFsService {
   buildAssetPath(assetType: string, filename: string): string {
     // Use a default assets path since config doesn't have assetsUrl
     return `/assets/${assetType}/${filename}`;
+  }
+
+  // Animation control methods
+  pauseAnimation(): void {
+    if (this.rive && this.rive.isPlaying) {
+      this.rive.pause();
+      console.log('⏸️ Paused Rive animation');
+    }
+  }
+
+  playAnimation(): void {
+    if (this.rive && !this.rive.isPlaying) {
+      this.rive.play();
+      console.log('▶️ Started Rive animation');
+    }
+  }
+
+  startAnimationWithData(): void {
+    if (this.rive) {
+      this.rive.play();
+      console.log('🎬 Started Rive animation with data loaded');
+    }
+  }
+
+  isAnimationPlaying(): boolean {
+    return this.rive ? this.rive.isPlaying : false;
   }
 
   // Debug method to log all available elements

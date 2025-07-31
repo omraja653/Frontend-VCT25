@@ -4,6 +4,7 @@
   "sponsorImageUrls": [
     "/assets/misc/logo.webp"
   ],
+  "mapbanEndpoint": "https://mapban-socket.valospectra.com/",
   "sponsorImageRotateSpeed": 5000,
   "attackerColorPrimary": "#b82e3c",
   "attackerColorSecondary": "#ff4557",

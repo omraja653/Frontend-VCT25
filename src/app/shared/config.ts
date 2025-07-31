@@ -1,10 +1,10 @@
 export class Config {
-  serverEndpoint = "http://localhost:5200";
+  serverEndpoint = "https://na.valospectra.com:5200";
   redirectUrl = "https://nobii.dev/src/landing";
   sponsorImageUrls: string[] = [];
   sponsorImageRotateSpeed = 5000; // in milliseconds
 
-  mapbanEndpoint = "http://localhost:11201";
+  mapbanEndpoint = "https://eu.valospectra.com:11201";
 
   attackerColorPrimary = "#b82e3c";
   attackerColorSecondary = "#ff4557";

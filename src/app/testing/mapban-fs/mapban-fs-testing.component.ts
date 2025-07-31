@@ -120,7 +120,7 @@ export class MapbanFsTestingComponent implements OnInit {
         { 
           name: "Fnatic", 
           tricode: "FNC", 
-          url: "/assets/misc/icon.webp"
+          url: "/assets/misc/logo.webp"
         }
       ],
       format: "bo3",
@@ -198,7 +198,7 @@ export class MapbanFsTestingComponent implements OnInit {
         { 
           name: "NAVI", 
           tricode: "NAVI", 
-          url: "/assets/misc/icon.webp"
+          url: "/assets/misc/logo.webp"
         }
       ],
       format: "bo5",
@@ -275,8 +275,8 @@ export class MapbanFsTestingComponent implements OnInit {
         },
         { 
           name: "FaZe Clan", 
-          tricode: "FZE", 
-          url: "/assets/misc/icon.webp"
+          tricode: "FAZE", 
+          url: "/assets/misc/logo.webp"
         }
       ],
       format: "bo3",
@@ -336,7 +336,7 @@ export class MapbanFsTestingComponent implements OnInit {
         { 
           name: "Team Beta", 
           tricode: "BETA", 
-          url: "/assets/misc/icon.webp"
+          url: "/assets/misc/logo.webp"
         }
       ],
       format: undefined,

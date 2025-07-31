@@ -32,6 +32,10 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
   // Match data for assets
   private match: any = null;
 
+  // Track if this is the first data load
+  private isInitialLoad = true;
+  private hasRealData = false; // Track if we've received actual data vs test data
+
   constructor() {
     const params = this.route.snapshot.queryParams;
     this.sessionCode = params["sessionId"] || "UNKNOWN";
@@ -59,8 +63,8 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       console.log('🧪 No match data available, using test data for mapban-fs');
       this.match = {
         teams: [
-          { name: "Sentinels", tricode: "SEN", teamUrl: "/assets/misc/icon.webp" },
-          { name: "Fnatic", tricode: "FNC", teamUrl: "/assets/misc/icon.webp" }
+          { name: "The Zoologists", tricode: "ZOO", teamUrl: "/assets/misc/icon.webp" },
+          { name: "The Naturals", tricode: "INT", teamUrl: "/assets/misc/icon.webp" }
         ],
         tools: {
           sponsorInfo: {
@@ -78,25 +82,30 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         sessionIdentifier: "test-session",
         organizationName: "Test Org",
         teams: [
-          { name: "Sentinels", tricode: "SEN", url: "/assets/misc/icon.webp" },
-          { name: "Fnatic", tricode: "FNC", url: "/assets/misc/icon.webp" }
+          { name: "The Zoologists", tricode: "ZOO", url: "/assets/misc/icon.webp" },
+          { name: "The Naturals", tricode: "INT", url: "/assets/misc/icon.webp" }
         ],
         format: "bo3",
         availableMaps: [],
         selectedMaps: [
-          // Test BO3 scenario: maps 1,2,3,4 are banned, maps 5,6,7 are picked
-          Object.assign(new SessionMap("Ascent"), { bannedBy: 0 }),
-          Object.assign(new SessionMap("Bind"), { bannedBy: 1 }),
-          Object.assign(new SessionMap("Haven"), { bannedBy: 0 }),
-          Object.assign(new SessionMap("Split"), { bannedBy: 1 }),
-          Object.assign(new SessionMap("Lotus"), { pickedBy: 0 }),
-          Object.assign(new SessionMap("Sunset"), { pickedBy: 1 }),
-          Object.assign(new SessionMap("Icebox"), {}) // Decider map
+          // Actual chronological order: Icebox ban, Bind ban, Lotus pick, Haven pick, Corrode ban, Ascent ban, Sunset decider
+          Object.assign(new SessionMap("Icebox"), { bannedBy: 0 }),    // BAN 1
+          Object.assign(new SessionMap("Bind"), { bannedBy: 1 }),      // BAN 2
+          Object.assign(new SessionMap("Lotus"), { pickedBy: 0 }),     // PICK 1
+          Object.assign(new SessionMap("Haven"), { pickedBy: 1 }),     // PICK 2
+          Object.assign(new SessionMap("Corrode"), { bannedBy: 0 }),   // BAN 3
+          Object.assign(new SessionMap("Ascent"), { bannedBy: 1 }),    // BAN 4
+          Object.assign(new SessionMap("Sunset"), {}) // DECIDER
         ],
         stage: "pick" as Stage,
-        actingTeamCode: "SEN",
+        actingTeamCode: "ZOO",
         actingTeam: 0
       };
+      console.log('⏳ Test data loaded - waiting for real data before starting animation');
+    } else {
+      // We have real data from input
+      this.hasRealData = true;
+      console.log('📡 Real data detected from input');
     }
     
     // Initialize Rive animation after view is ready
@@ -105,6 +114,8 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes["data"] && changes["data"].currentValue) {
+      this.hasRealData = true; // Mark that we have real data from input
+      console.log('📡 Real data received via input change');
       this.updateMapbanData({ data: changes["data"].currentValue });
     }
   }
@@ -135,9 +146,23 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       
       console.log('🎬 Rive mapban-fs animation initialized successfully');
       
-      // Force an immediate update with test data
-      console.log('📊 Triggering immediate animation update with test data...');
-      this.updateRiveAnimation();
+      // Only prepare and start animation if we have real data
+      if (this.hasRealData) {
+        console.log('📊 Preparing animation with real data...');
+        this.updateRiveAnimation();
+      } else {
+        console.log('⏳ Rive ready - waiting for real data before starting animation...');
+        
+        // Fallback: Start with test data after 5 seconds if no real data comes in
+        // This is useful for development/testing when no socket data is available
+        setTimeout(() => {
+          if (!this.hasRealData && !this.riveService.isAnimationPlaying()) {
+            console.log('⚠️ No real data received after 5 seconds, starting with test data for development');
+            this.hasRealData = true; // Allow test data to be used
+            this.updateRiveAnimation();
+          }
+        }, 5000);
+      }
       
     } catch (error) {
       console.error('❌ Failed to initialize Rive mapban-fs animation:', error);
@@ -162,15 +187,17 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       '/assets/maps/wide/Icebox.webp',
       '/assets/maps/wide/Breeze.webp',
       '/assets/maps/wide/Fracture.webp',
-      '/assets/maps/wide/Pearl.webp'
+      '/assets/maps/wide/Pearl.webp',
+      '/assets/maps/wide/Corrode.webp'
     ];
 
     // Add team logo URLs if available
-    if (this.match?.teams?.[0]?.teamUrl) {
-      allAssetUrls.push(this.match.teams[0].teamUrl);
+    const teams = this.data?.teams || [];
+    if (teams[0]?.url) {
+      allAssetUrls.push(teams[0].url);
     }
-    if (this.match?.teams?.[1]?.teamUrl) {
-      allAssetUrls.push(this.match.teams[1].teamUrl);
+    if (teams[1]?.url) {
+      allAssetUrls.push(teams[1].url);
     }
 
     const preloadPromises = allAssetUrls.map(async (url) => {
@@ -199,41 +226,119 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
   }
 
   private buildMapbanAssets(): MapbanFsAssets {
+    const teams = this.data?.teams || [];
+    const team1Url = teams[0]?.url || '/assets/misc/icon.webp';
+    const team2Url = teams[1]?.url || '/assets/misc/logo.webp'; // Default to a different logo for debugging
+    
     const assets: MapbanFsAssets = {
-      sponsor: this.match?.tools?.sponsorInfo?.sponsors?.[0] || '/assets/misc/icon.webp',
-      eventLogo: '/assets/misc/icon.webp',
-      t1_logo: this.match?.teams?.[0]?.teamUrl || '/assets/misc/icon.webp',
-      t2_logo: this.match?.teams?.[1]?.teamUrl || '/assets/misc/icon.webp',
-      team1_logo: this.match?.teams?.[0]?.teamUrl || '/assets/misc/icon.webp', // Team 1 logo for past maps
-      team2_logo: this.match?.teams?.[1]?.teamUrl || '/assets/misc/icon.webp', // Team 2 logo for past maps
+      team1Logo: team1Url,
+      team2Logo: team2Url,
     };
 
-    // Add map assets for maps 1-7 (all possible map slots)
-    for (let i = 1; i <= 7; i++) {
-      const mapKey = `map_${i}` as keyof MapbanFsAssets;
-      if (this.data?.selectedMaps?.[i - 1]?.name) {
-        assets[mapKey] = `/assets/maps/wide/${this.data.selectedMaps[i - 1].name}.webp`;
-      } else {
-        assets[mapKey] = '/assets/maps/wide/Ascent.webp'; // Default fallback
+    console.log('🏗️ Building mapban-fs assets with team logos:', {
+      team1Logo: team1Url,
+      team2Logo: team2Url,
+      team1Name: teams[0]?.name,
+      team2Name: teams[1]?.name,
+    });
+
+    // Determine series format based on bans
+    const totalBans = this.data?.selectedMaps?.filter(map => map.bannedBy !== undefined).length || 0;
+    const isBO3 = totalBans === 4;
+    const isBO5 = totalBans === 2;
+
+    // Separate maps by type from chronological order
+    const bannedMaps = this.data?.selectedMaps?.filter(map => map.bannedBy !== undefined) || [];
+    const pickedMaps = this.data?.selectedMaps?.filter(map => map.pickedBy !== undefined) || [];
+    const deciderMaps = this.data?.selectedMaps?.filter(map => map.bannedBy === undefined && map.pickedBy === undefined) || [];
+
+    console.log('📊 Map distribution:', {
+      banned: bannedMaps.map(m => m.name),
+      picked: pickedMaps.map(m => m.name),
+      decider: deciderMaps.map(m => m.name),
+      isBO3,
+      isBO5
+    });
+
+    // Assign map images based on animation layout structure
+    if (isBO3) {
+      // BO3: Maps 1-4 are bans, Maps 5-7 are picks/decider
+      
+      // Assign banned maps to positions 1-4
+      for (let i = 0; i < 4 && i < bannedMaps.length; i++) {
+        const mapKey = `map_${i + 1}` as keyof MapbanFsAssets;
+        const mapName = bannedMaps[i]?.name;
+        assets[mapKey] = mapName ? `/assets/maps/wide/${mapName}.webp` : '/assets/maps/wide/Ascent.webp';
+      }
+      
+      // Assign picked maps to positions 5-6
+      for (let i = 0; i < 2 && i < pickedMaps.length; i++) {
+        const mapKey = `map_${i + 5}` as keyof MapbanFsAssets;
+        const mapName = pickedMaps[i]?.name;
+        assets[mapKey] = mapName ? `/assets/maps/wide/${mapName}.webp` : '/assets/maps/wide/Ascent.webp';
+      }
+      
+      // Assign decider to position 7
+      if (deciderMaps.length > 0) {
+        assets.map_7 = `/assets/maps/wide/${deciderMaps[0].name}.webp`;
+      }
+    } else if (isBO5) {
+      // BO5: Maps 1-2 are bans, Maps 3-7 are picks/decider
+      
+      // Assign banned maps to positions 1-2
+      for (let i = 0; i < 2 && i < bannedMaps.length; i++) {
+        const mapKey = `map_${i + 1}` as keyof MapbanFsAssets;
+        const mapName = bannedMaps[i]?.name;
+        assets[mapKey] = mapName ? `/assets/maps/wide/${mapName}.webp` : '/assets/maps/wide/Ascent.webp';
+      }
+      
+      // Assign picked maps to positions 3-6
+      for (let i = 0; i < 4 && i < pickedMaps.length; i++) {
+        const mapKey = `map_${i + 3}` as keyof MapbanFsAssets;
+        const mapName = pickedMaps[i]?.name;
+        assets[mapKey] = mapName ? `/assets/maps/wide/${mapName}.webp` : '/assets/maps/wide/Ascent.webp';
+      }
+      
+      // Assign decider to position 7
+      if (deciderMaps.length > 0) {
+        assets.map_7 = `/assets/maps/wide/${deciderMaps[0].name}.webp`;
+      }
+    } else {
+      // Fallback: Use sequential order if format is unclear
+      for (let i = 1; i <= 7; i++) {
+        const mapKey = `map_${i}` as keyof MapbanFsAssets;
+        const mapIndex = i - 1;
+        const sessionMap = this.data?.selectedMaps?.[mapIndex];
+        const mapName = sessionMap?.name;
+        assets[mapKey] = mapName ? `/assets/maps/wide/${mapName}.webp` : '/assets/maps/wide/Ascent.webp';
       }
     }
 
     console.log('🏗️ Built mapban-fs assets:', assets);
-    console.log('📊 Current data:', this.data);
-    console.log('🏟️ Current match:', this.match);
     return assets;
   }
 
   private updateMapbanData(socketData: any): void {
+    let dataUpdated = false;
+    
     if (socketData.data) {
       this.data = socketData.data;
+      this.hasRealData = true; // Mark that we have real data
+      dataUpdated = true;
+      console.log('📡 Real session data received via socket');
     }
     if (socketData.match) {
       this.match = socketData.match;
+      console.log('📡 Real match data received via socket');
     }
     
-    // Update Rive animation based on the data
-    this.updateRiveAnimation();
+    // Only update animation if we have real data
+    if (dataUpdated && this.hasRealData) {
+      console.log('🔄 Updating animation with real data');
+      this.updateRiveAnimation();
+    } else if (!this.hasRealData) {
+      console.log('⏳ Ignoring update - still waiting for real session data');
+    }
   }
 
   private updateRiveAnimation(): void {
@@ -242,28 +347,68 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       return;
     }
     
-    console.log('🔄 Updating Rive animation with data:', this.data);
-    
-    // Determine series format and set appropriate artboard
-    this.setSeriesArtboard();
-    
-    // Set team information
-    this.setTeamInformation();
-    
-    // Process map states and update ban/pick information
-    this.processMapStates();
-    
-    // Update sponsor information if available
-    if (this.match?.tools?.sponsorInfo) {
-      console.log('📢 Updating sponsor info:', this.match.tools.sponsorInfo);
-      this.riveService.updateSponsorInfo(this.match.tools.sponsorInfo);
+    // Don't start animation with test data - wait for real data
+    if (!this.hasRealData) {
+      console.log('⏳ Skipping animation start - waiting for real data (currently using test data)');
+      return;
     }
     
-    // Update assets if they've changed
-    const newAssets = this.buildMapbanAssets();
-    this.riveService.updateAssetsFromPreloaded(newAssets, this.preloadedAssets);
+    console.log('🔄 Updating Rive animation with real data:', this.data);
     
-    console.log('✅ Rive animation update completed');
+    // Handle differently for initial load vs subsequent updates
+    const shouldPauseForUpdate = !this.isInitialLoad && this.riveService.isAnimationPlaying();
+    
+    if (shouldPauseForUpdate) {
+      console.log('⏸️ Pausing animation for data update...');
+      this.riveService.pauseAnimation();
+    }
+    
+    try {
+      // Determine series format and set appropriate artboard
+      this.setSeriesArtboard();
+      
+      // Set team information
+      this.setTeamInformation();
+      
+      // Process map states and update ban/pick information
+      this.processMapStates();
+      
+      // Update sponsor information if available
+      if (this.match?.tools?.sponsorInfo) {
+        console.log('📢 Updating sponsor info:', this.match.tools.sponsorInfo);
+        this.riveService.updateSponsorInfo(this.match.tools.sponsorInfo);
+      }
+      
+      // Update assets if they've changed
+      const newAssets = this.buildMapbanAssets();
+      this.riveService.updateAssetsFromPreloaded(newAssets, this.preloadedAssets);
+      
+      console.log('✅ All real data updated');
+      
+      // Start animation for initial load, or resume for subsequent updates
+      setTimeout(() => {
+        if (this.isInitialLoad) {
+          this.riveService.startAnimationWithData();
+          console.log('🎬 Animation started with complete real data');
+          this.isInitialLoad = false;
+        } else if (shouldPauseForUpdate) {
+          this.riveService.playAnimation();
+          console.log('▶️ Animation resumed after real data update');
+        }
+      }, this.isInitialLoad ? 100 : 50); // Longer delay for initial load
+      
+    } catch (error) {
+      console.error('❌ Error during animation update:', error);
+      // Still start/resume animation even if there was an error
+      setTimeout(() => {
+        if (this.isInitialLoad) {
+          this.riveService.startAnimationWithData();
+          this.isInitialLoad = false;
+        } else if (shouldPauseForUpdate) {
+          this.riveService.playAnimation();
+        }
+      }, this.isInitialLoad ? 100 : 50);
+    }
   }
 
   private setSeriesArtboard(): void {
@@ -307,76 +452,290 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     
     const mapStates: MapState[] = [];
     
-    this.data.selectedMaps.forEach((sessionMap, index) => {
-      const mapNumber = index + 1;
-      const mapState: MapState = {
-        mapNumber,
-        mapName: sessionMap.name,
-        isBanned: sessionMap.bannedBy !== undefined,
-        isPicked: sessionMap.pickedBy !== undefined,
-        bannedBy: sessionMap.bannedBy,
-        pickedBy: sessionMap.pickedBy,
-        isPastMap: this.isPastMap(sessionMap), // Check if this is a past map with scores
-        mapScore: this.getMapScore(sessionMap) // Get score if it's a past map
-      };
-      mapStates.push(mapState);
+    // Determine series format
+    const totalBans = this.data.selectedMaps.filter(map => map.bannedBy !== undefined).length;
+    const isBO3 = totalBans === 4;
+    const isBO5 = totalBans === 2;
+
+    // Separate maps by type from chronological order
+    const bannedMaps = this.data.selectedMaps.filter(map => map.bannedBy !== undefined);
+    const pickedMaps = this.data.selectedMaps.filter(map => map.pickedBy !== undefined);
+    const deciderMaps = this.data.selectedMaps.filter(map => map.bannedBy === undefined && map.pickedBy === undefined);
+
+    // Set text runs based on animation layout structure
+    if (isBO3) {
+      // BO3: Maps 1-4 are bans, Maps 5-7 are picks/decider
       
-      // Set map name for banned maps in ALL CAPS (maps 1-2 and 5-6 for BO3, maps 1-2 for BO5)
-      if (mapState.isBanned) {
-        this.riveService.setTextRun(`MAP ${mapNumber} TEXT`, (sessionMap.name || '').toUpperCase());
+      // Set ban text runs for positions 1-4
+      for (let i = 0; i < 4; i++) {
+        const mapNumber = i + 1;
+        const bannedMap = bannedMaps[i];
+        
+        if (bannedMap) {
+          this.riveService.setTextRun(`MAP ${mapNumber} TEXT`, bannedMap.name.toUpperCase());
+          
+          const mapState: MapState = {
+            mapNumber,
+            mapName: bannedMap.name,
+            isBanned: true,
+            isPicked: false,
+            bannedBy: bannedMap.bannedBy,
+            pickedBy: undefined,
+            isPastMap: this.isPastMap(bannedMap),
+            mapScore: this.getMapScore(bannedMap)
+          };
+          mapStates.push(mapState);
+        }
       }
       
-      // Update pick information for maps 3-7
-      if (mapNumber >= 3 && mapNumber <= 7) {
-        if (mapState.isPicked && mapState.pickedBy !== undefined) {
-          const teamTricode = this.data.teams[mapState.pickedBy]?.tricode || 'TEAM';
+      // Set pick text runs for positions 5-6
+      for (let i = 0; i < 2; i++) {
+        const mapNumber = i + 5;
+        const pickedMap = pickedMaps[i];
+        
+        if (pickedMap) {
+          this.riveService.setTextRun(`MAP ${mapNumber} TEXT`, pickedMap.name.toUpperCase());
           
-          // Set MAP DEF TEAM (team that picked gets to choose side, opponent defends)
-          const defTeamIndex = mapState.pickedBy === 0 ? 1 : 0;
+          // Set pick team information
+          const teamTricode = this.data.teams[pickedMap.pickedBy!]?.tricode || 'TEAM';
+          const defTeamIndex = pickedMap.pickedBy === 0 ? 1 : 0;
           const defTeamTricode = this.data.teams[defTeamIndex]?.tricode || 'TEAM';
+          
           this.riveService.setTextRun(`MAP ${mapNumber} DEF TEAM`, defTeamTricode);
-          
-          // Set MAP PICK TEAM
           this.riveService.setTextRun(`MAP ${mapNumber} PICK TEAM`, teamTricode);
+          this.riveService.setTextRun(`MAP ${mapNumber} PICK`, 'PICK');
           
-          // Set MAP PICK text (PICK or DECIDER for map 7)
-          const pickText = mapNumber === 7 ? 'DECIDER' : 'PICK';
-          this.riveService.setTextRun(`MAP ${mapNumber} PICK`, pickText);
-        }
-        
-        // Set MAP TEXT (map name in ALL CAPS) for all maps that have a name
-        if (sessionMap.name && sessionMap.name.trim() !== '') {
-          this.riveService.setTextRun(`MAP ${mapNumber} TEXT`, sessionMap.name.toUpperCase());
-        }
-        
-        // Handle past map scores
-        if (mapState.isPastMap && mapState.mapScore) {
-          this.riveService.setPastMapScore(mapNumber, mapState.mapScore, true);
+          // Handle pastMap and score display
+          const isPastMap = this.isPastMap(pickedMap);
+          const mapScore = this.getMapScore(pickedMap);
+          
+          console.log(`🔍 BO3 Map ${mapNumber} (${pickedMap.name}) debug:`, {
+            score: pickedMap.score,
+            isPastMap,
+            mapScore
+          });
+          
+          if (isPastMap && mapScore) {
+            // Only call setPastMapScore if there's actual score data
+            this.riveService.setPastMapScore(mapNumber, mapScore, true);
+            console.log(`📊 Map ${mapNumber} (${pickedMap.name}) marked as past map with score: ${mapScore}`);
+          } else {
+            // Explicitly reset pastMap to false for maps without score data
+            this.riveService.setPastMapScore(mapNumber, null, false);
+            console.log(`⏭️ Map ${mapNumber} (${pickedMap.name}) explicitly reset pastMap to false`);
+          }
+          
+          const mapState: MapState = {
+            mapNumber,
+            mapName: pickedMap.name,
+            isBanned: false,
+            isPicked: true,
+            bannedBy: undefined,
+            pickedBy: pickedMap.pickedBy,
+            isPastMap,
+            mapScore
+          };
+          mapStates.push(mapState);
         }
       }
-    });
+      
+      // Set decider text run for position 7
+      if (deciderMaps.length > 0) {
+        const deciderMap = deciderMaps[0];
+        this.riveService.setTextRun('MAP 7 TEXT', deciderMap.name.toUpperCase());
+        this.riveService.setTextRun('MAP 7 PICK', 'DECIDER');
+        
+        // Handle pastMap and score display for decider
+        const isPastMap = this.isPastMap(deciderMap);
+        const mapScore = this.getMapScore(deciderMap);
+        
+        console.log(`🔍 BO3 Decider Map 7 (${deciderMap.name}) debug:`, {
+          score: deciderMap.score,
+          isPastMap,
+          mapScore
+        });
+        
+        if (isPastMap && mapScore) {
+          // Only call setPastMapScore if there's actual score data
+          this.riveService.setPastMapScore(7, mapScore, true);
+          console.log(`📊 Map 7 (${deciderMap.name}) marked as past map with score: ${mapScore}`);
+        } else {
+          // Explicitly reset pastMap to false for maps without score data
+          this.riveService.setPastMapScore(7, null, false);
+          console.log(`⏭️ Map 7 (${deciderMap.name}) explicitly reset pastMap to false`);
+        }
+        
+        const mapState: MapState = {
+          mapNumber: 7,
+          mapName: deciderMap.name,
+          isBanned: false,
+          isPicked: false,
+          bannedBy: undefined,
+          pickedBy: undefined,
+          isPastMap,
+          mapScore
+        };
+        mapStates.push(mapState);
+      }
+    } else if (isBO5) {
+      // BO5: Maps 1-2 are bans, Maps 3-7 are picks/decider
+      
+      // Set ban text runs for positions 1-2
+      for (let i = 0; i < 2; i++) {
+        const mapNumber = i + 1;
+        const bannedMap = bannedMaps[i];
+        
+        if (bannedMap) {
+          this.riveService.setTextRun(`MAP ${mapNumber} TEXT`, bannedMap.name.toUpperCase());
+          
+          const mapState: MapState = {
+            mapNumber,
+            mapName: bannedMap.name,
+            isBanned: true,
+            isPicked: false,
+            bannedBy: bannedMap.bannedBy,
+            pickedBy: undefined,
+            isPastMap: this.isPastMap(bannedMap),
+            mapScore: this.getMapScore(bannedMap)
+          };
+          mapStates.push(mapState);
+        }
+      }
+      
+      // Set pick text runs for positions 3-6
+      for (let i = 0; i < 4; i++) {
+        const mapNumber = i + 3;
+        const pickedMap = pickedMaps[i];
+        
+        if (pickedMap) {
+          this.riveService.setTextRun(`MAP ${mapNumber} TEXT`, pickedMap.name.toUpperCase());
+          
+          // Set pick team information
+          const teamTricode = this.data.teams[pickedMap.pickedBy!]?.tricode || 'TEAM';
+          const defTeamIndex = pickedMap.pickedBy === 0 ? 1 : 0;
+          const defTeamTricode = this.data.teams[defTeamIndex]?.tricode || 'TEAM';
+          
+          this.riveService.setTextRun(`MAP ${mapNumber} DEF TEAM`, defTeamTricode);
+          this.riveService.setTextRun(`MAP ${mapNumber} PICK TEAM`, teamTricode);
+          this.riveService.setTextRun(`MAP ${mapNumber} PICK`, 'PICK');
+          
+          // Handle pastMap and score display
+          const isPastMap = this.isPastMap(pickedMap);
+          const mapScore = this.getMapScore(pickedMap);
+          
+          console.log(`🔍 BO5 Map ${mapNumber} (${pickedMap.name}) debug:`, {
+            score: pickedMap.score,
+            isPastMap,
+            mapScore
+          });
+          
+          if (isPastMap && mapScore) {
+            // Only call setPastMapScore if there's actual score data
+            this.riveService.setPastMapScore(mapNumber, mapScore, true);
+            console.log(`📊 Map ${mapNumber} (${pickedMap.name}) marked as past map with score: ${mapScore}`);
+          } else {
+            // Explicitly reset pastMap to false for maps without score data
+            this.riveService.setPastMapScore(mapNumber, null, false);
+            console.log(`⏭️ Map ${mapNumber} (${pickedMap.name}) explicitly reset pastMap to false`);
+          }
+          
+          const mapState: MapState = {
+            mapNumber,
+            mapName: pickedMap.name,
+            isBanned: false,
+            isPicked: true,
+            bannedBy: undefined,
+            pickedBy: pickedMap.pickedBy,
+            isPastMap,
+            mapScore
+          };
+          mapStates.push(mapState);
+        }
+      }
+      
+      // Set decider text run for position 7
+      if (deciderMaps.length > 0) {
+        const deciderMap = deciderMaps[0];
+        this.riveService.setTextRun('MAP 7 TEXT', deciderMap.name.toUpperCase());
+        this.riveService.setTextRun('MAP 7 PICK', 'DECIDER');
+        
+        const mapState: MapState = {
+          mapNumber: 7,
+          mapName: deciderMap.name,
+          isBanned: false,
+          isPicked: false,
+          bannedBy: undefined,
+          pickedBy: undefined,
+          isPastMap: this.isPastMap(deciderMap),
+          mapScore: this.getMapScore(deciderMap)
+        };
+        mapStates.push(mapState);
+      }
+    } else {
+      // Fallback: Use chronological order if format is unclear
+      this.data.selectedMaps.forEach((sessionMap, index) => {
+        const mapNumber = index + 1;
+        const mapState: MapState = {
+          mapNumber,
+          mapName: sessionMap.name,
+          isBanned: sessionMap.bannedBy !== undefined,
+          isPicked: sessionMap.pickedBy !== undefined,
+          bannedBy: sessionMap.bannedBy,
+          pickedBy: sessionMap.pickedBy,
+          isPastMap: this.isPastMap(sessionMap),
+          mapScore: this.getMapScore(sessionMap)
+        };
+        mapStates.push(mapState);
+        
+        // Set text runs
+        if (mapState.isBanned) {
+          this.riveService.setTextRun(`MAP ${mapNumber} TEXT`, sessionMap.name.toUpperCase());
+        } else if (mapNumber >= 3 && mapNumber <= 7) {
+          this.riveService.setTextRun(`MAP ${mapNumber} TEXT`, sessionMap.name.toUpperCase());
+          
+          if (mapState.isPicked && mapState.pickedBy !== undefined) {
+            const teamTricode = this.data.teams[mapState.pickedBy]?.tricode || 'TEAM';
+            const defTeamIndex = mapState.pickedBy === 0 ? 1 : 0;
+            const defTeamTricode = this.data.teams[defTeamIndex]?.tricode || 'TEAM';
+            
+            this.riveService.setTextRun(`MAP ${mapNumber} DEF TEAM`, defTeamTricode);
+            this.riveService.setTextRun(`MAP ${mapNumber} PICK TEAM`, teamTricode);
+            this.riveService.setTextRun(`MAP ${mapNumber} PICK`, mapNumber === 7 ? 'DECIDER' : 'PICK');
+          }
+        }
+      });
+    }
     
     // Update map states and ban texts with team data
     this.riveService.updateMapStates(mapStates, this.data.teams);
   }
 
   private isPastMap(sessionMap: SessionMap): boolean {
-    // Check if this map has score data (indicating it's been played)
-    // This would come from your data endpoint - adjust this logic based on your data structure
-    return !!(sessionMap as any).score || !!(sessionMap as any).leftScore || !!(sessionMap as any).rightScore;
+    // Check if this map has valid score data (indicating it's been played)
+    return sessionMap.score && 
+           sessionMap.score[0] !== undefined && 
+           sessionMap.score[1] !== undefined &&
+           typeof sessionMap.score[0] === 'number' &&
+           typeof sessionMap.score[1] === 'number';
   }
 
-  private getMapScore(sessionMap: SessionMap): { team1: number; team2: number } | null {
+  private getMapScore(sessionMap: SessionMap): { team1: number; team2: number } | string | null {
     // Extract score data from the session map
-    // Adjust this based on your actual data structure
-    const leftScore = (sessionMap as any).leftScore || (sessionMap as any).score?.left || 0;
-    const rightScore = (sessionMap as any).rightScore || (sessionMap as any).score?.right || 0;
-    
-    if (leftScore !== undefined && rightScore !== undefined) {
-      return { team1: leftScore, team2: rightScore };
+    if (!sessionMap.score || 
+        sessionMap.score[0] === undefined || 
+        sessionMap.score[1] === undefined) {
+      return null;
     }
     
-    return null;
+    const score1 = sessionMap.score[0];
+    const score2 = sessionMap.score[1];
+    
+    // Return formatted score string with higher score first
+    if (score1 > score2) {
+      return `${score1} - ${score2}`;
+    } else {
+      return `${score2} - ${score1}`;
+    }
   }
 }
 
@@ -405,6 +764,7 @@ export class SessionMap {
   pickedBy?: 0 | 1 = undefined;
   sidePickedBy?: 0 | 1 = undefined;
   pickedAttack: boolean | undefined = undefined;
+  score: (number | undefined)[] = [undefined, undefined];
 
   constructor(name: string) {
     this.name = name;
