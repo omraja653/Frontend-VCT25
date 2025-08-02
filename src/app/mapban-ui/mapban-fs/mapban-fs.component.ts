@@ -37,6 +37,9 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
   private hasRealData = false; // Track if we've received actual data vs test data
   private hasSocketData = false; // Track if we've received data from socket
 
+  // Track if this is a BO1 format (which should show message instead of Rive)
+  public isBO1Format = false;
+
   constructor() {
     const params = this.route.snapshot.queryParams;
     this.sessionCode = params["sessionId"] || "UNKNOWN";
@@ -89,17 +92,24 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       return false;
     }
     
-    // Check if at least some maps have valid names
+    // Check if we have format information (either explicit format or enough data to determine it)
+    const hasExplicitFormat = this.data.format && (this.data.format === 'bo1' || this.data.format === 'bo3' || this.data.format === 'bo5');
+    
+    // For BO1, we can proceed immediately if we have explicit format
+    if (this.data.format === 'bo1') {
+      console.log('✅ BO1 format detected - complete data available for message display');
+      return true;
+    }
+    
+    // Check if at least some maps have valid names (required for BO3/BO5)
     const mapsWithNames = this.data.selectedMaps.filter(map => map && map.name && typeof map.name === 'string' && map.name.trim() !== '');
     if (mapsWithNames.length === 0) {
       console.log('⏳ No maps with valid names found');
       return false;
     }
     
-    // Check if we have format information (either explicit format or enough data to determine it)
-    const hasExplicitFormat = this.data.format && (this.data.format === 'bo3' || this.data.format === 'bo5');
     const totalBans = this.data.selectedMaps.filter(map => map.bannedBy !== undefined).length;
-    const canDetermineFormat = totalBans === 4 || totalBans === 2; // BO3 or BO5
+    const canDetermineFormat = totalBans === 4 || totalBans === 2 || totalBans === 0; // BO3, BO5, or BO1
     
     if (!hasExplicitFormat && !canDetermineFormat) {
       console.log('⏳ Cannot determine series format yet', {
@@ -149,16 +159,23 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     if (!this.data?.selectedMaps) {
       // Default to BO3 if no data available
       console.log('📁 No map data available, defaulting to BO3 Rive file');
+      this.isBO1Format = false;
       return '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
     }
     
     // First check if format is explicitly set in the data
     if (this.data.format) {
-      if (this.data.format === 'bo5') {
+      if (this.data.format === 'bo1') {
+        console.log('📁 BO1 format detected - no Rive file needed, showing message instead');
+        this.isBO1Format = true;
+        return ''; // No Rive file for BO1
+      } else if (this.data.format === 'bo5') {
         console.log('📁 Using BO5 Rive file: mapban-fs-bo5.riv (format explicitly set to bo5)');
+        this.isBO1Format = false;
         return '/assets/mapban/mapban-fs/mapban-fs-bo5.riv';
       } else if (this.data.format === 'bo3') {
         console.log('📁 Using BO3 Rive file: mapban-fs-bo3.riv (format explicitly set to bo3)');
+        this.isBO1Format = false;
         return '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
       }
     }
@@ -166,15 +183,22 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     // Fallback: Count total bans to determine series format
     const totalBans = this.data.selectedMaps.filter(map => map.bannedBy !== undefined).length;
     
-    // BO3: 4 bans total, BO5: 2 bans total
+    // BO3: 4 bans total, BO5: 2 bans total, BO1: 0 bans (or very few maps)
     const isBO3 = totalBans === 4;
     const isBO5 = totalBans === 2;
+    const isBO1 = totalBans === 0 || this.data.selectedMaps.length <= 1;
     
-    if (isBO5) {
+    if (isBO1) {
+      console.log('📁 BO1 format detected via fallback - no Rive file needed, showing message instead');
+      this.isBO1Format = true;
+      return ''; // No Rive file for BO1
+    } else if (isBO5) {
       console.log('📁 Using BO5 Rive file: mapban-fs-bo5.riv (2 bans detected via fallback)');
+      this.isBO1Format = false;
       return '/assets/mapban/mapban-fs/mapban-fs-bo5.riv';
     } else if (isBO3) {
       console.log('📁 Using BO3 Rive file: mapban-fs-bo3.riv (4 bans detected via fallback)');
+      this.isBO1Format = false;
       return '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
     } else {
       console.log('📁 Unable to determine series format, defaulting to BO3 Rive file: mapban-fs-bo3.riv');
@@ -183,6 +207,7 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         totalBans,
         totalMaps: this.data.selectedMaps.length
       });
+      this.isBO1Format = false;
       return '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
     }
   }
@@ -190,6 +215,12 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
   private async initializeRiveWithCompleteData(): Promise<void> {
     // Determine the series format to choose the correct Rive file
     const riveFileName = this.getRiveFileName();
+    
+    // If this is a BO1 format, don't initialize Rive
+    if (this.isBO1Format) {
+      console.log('📁 BO1 format detected - skipping Rive initialization, showing message instead');
+      return;
+    }
     
     console.log('📁 Using Rive file:', riveFileName);
     
@@ -520,8 +551,14 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
   }
 
   private updateRiveAnimation(): void {
-    if (!this.data || !this.riveService.getRive()) {
+    if (!this.data || (!this.riveService.getRive() && !this.isBO1Format)) {
       console.log('⏸️ Skipping Rive update - missing data or Rive not initialized');
+      return;
+    }
+    
+    // If this is BO1 format, no Rive animation to update
+    if (this.isBO1Format) {
+      console.log('📁 BO1 format - no Rive animation to update, message is displayed');
       return;
     }
     
