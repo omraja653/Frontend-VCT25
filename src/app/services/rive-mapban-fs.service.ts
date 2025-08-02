@@ -116,7 +116,7 @@ export class RiveMapbanFsService {
     return preloadedAssets;
   }
 
-  initializeRive(canvas: HTMLCanvasElement, assets: MapbanFsAssets, preloadedAssets?: Map<string, Uint8Array>): Promise<Rive> {
+  initializeRive(canvas: HTMLCanvasElement, assets: MapbanFsAssets, preloadedAssets?: Map<string, Uint8Array>, riveFilePath?: string): Promise<Rive> {
     return new Promise((resolve, reject) => {
       this.canvas = canvas;
       
@@ -169,8 +169,12 @@ export class RiveMapbanFsService {
         return false;
       };
 
+      // Use provided Rive file path or default to the BO3 version
+      const riveFile = riveFilePath || '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
+      console.log('📁 Loading Rive file:', riveFile);
+
       this.rive = new Rive({
-        src: '/assets/mapban/mapban-fs/mapban-fs.riv',
+        src: riveFile,
         canvas: canvas,
         layout: new Layout({
           fit: Fit.Cover,
@@ -180,9 +184,6 @@ export class RiveMapbanFsService {
         assetLoader: assetLoader,
         onLoad: () => {
           console.log('✅ Rive mapban-fs loaded successfully');
-          
-          // Set initial artboard
-          this.setArtboard(this.currentArtboardName);
           
           if (this.rive) {
             console.log('🎬 Rive instance created successfully');
