@@ -91,28 +91,171 @@ export class RiveMapbanFsService {
     }
   }
 
+  /**
+   * Resize an image using the same method as agent-select component
+   * @param imageData - The original image data as Uint8Array
+   * @param isTeamLogo - Whether this is a team logo that needs resizing
+   * @param targetWidth - Target width (default 512)
+   * @param targetHeight - Target height (default 512)
+   * @returns Promise<Uint8Array> - The resized image data
+   */
+  private async resizeImageData(imageData: Uint8Array, isTeamLogo: boolean = false, targetWidth: number = 200, targetHeight: number = 200): Promise<Uint8Array> {
+    if (!isTeamLogo) {
+      // For non-team logos (maps, etc.), return original data
+      console.log('⏭️ Skipping resize for non-team logo asset');
+      return imageData;
+    }
+
+    let imageBitmap: ImageBitmap | null = null;
+    
+    try {
+      console.log(`🔧 STARTING resize for team logo: ${imageData.length} bytes → target ${targetWidth}x${targetHeight}`);
+      
+      // Create a blob from the image data
+      const imageBlob = new Blob([imageData]);
+      console.log(`📦 Created blob: ${imageBlob.size} bytes, type: ${imageBlob.type}`);
+      
+      // Create ImageBitmap from blob
+      imageBitmap = await createImageBitmap(imageBlob);
+      console.log(`🖼️ Created ImageBitmap: ${imageBitmap.width}x${imageBitmap.height}`);
+      
+      // Check if image dimensions are reasonable
+      if (imageBitmap.width <= 0 || imageBitmap.height <= 0 || imageBitmap.width > 4096 || imageBitmap.height > 4096) {
+        console.warn(`⚠️ Image dimensions out of range (${imageBitmap.width}x${imageBitmap.height}), using original data`);
+        return imageData;
+      }
+      
+      // Create canvas for resizing - same method as agent-select
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext("2d");
+      
+      if (!ctx) {
+        throw new Error('Could not get 2D context from canvas');
+      }
+      
+      console.log(`🎨 Canvas created: ${canvas.width}x${canvas.height}`);
+      
+      // Calculate scaling to maintain aspect ratio - same as agent-select
+      const scale = Math.min(targetWidth / imageBitmap.width, targetHeight / imageBitmap.height);
+      const drawWidth = imageBitmap.width * scale;
+      const drawHeight = imageBitmap.height * scale;
+      const dx = (canvas.width - drawWidth) / 2;
+      const dy = (canvas.height - drawHeight) / 2;
+      
+      console.log(`📐 Scaling calculation: scale=${scale.toFixed(3)}, drawSize=${drawWidth.toFixed(1)}x${drawHeight.toFixed(1)}, offset=(${dx.toFixed(1)}, ${dy.toFixed(1)})`);
+      
+      // Draw the resized image - same method as agent-select
+      ctx.drawImage(imageBitmap, dx, dy, drawWidth, drawHeight);
+      console.log(`✏️ Image drawn to canvas`);
+      
+      // Convert canvas to blob - same method as agent-select
+      const resizedBlob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/png");
+      });
+      
+      if (!resizedBlob) {
+        console.warn('⚠️ Canvas toBlob returned null, using original data');
+        return imageData;
+      }
+      
+      console.log(`📤 Canvas converted to blob: ${resizedBlob.size} bytes`);
+      
+      // Convert blob to Uint8Array
+      const resizedData = new Uint8Array(await resizedBlob.arrayBuffer());
+      
+      console.log(`✅ Team logo resized: ${imageBitmap.width}x${imageBitmap.height} → ${targetWidth}x${targetHeight} (scaled: ${drawWidth.toFixed(1)}x${drawHeight.toFixed(1)}) | Original: ${imageData.length} bytes → Resized: ${resizedData.length} bytes`);
+      
+      return resizedData;
+      
+    } catch (error) {
+      console.error('❌ Error resizing image:', error);
+      console.warn('⚠️ Image resizing failed, using original image data');
+      return imageData;
+    } finally {
+      // Ensure imageBitmap is closed if it was created
+      if (imageBitmap) {
+        imageBitmap.close();
+        console.log('🧹 ImageBitmap cleaned up');
+      }
+    }
+  }
+
+  /**
+   * Determine if a URL is a team logo that should be resized
+   * @param url - The asset URL
+   * @returns boolean - True if this is a team logo
+   */
+  private isTeamLogoUrl(url: string): boolean {
+    // Team logos are typically external URLs or not in standard asset paths
+    // Standard asset paths include maps, misc, etc.
+    const isStandardAsset = url.startsWith('/assets/maps/') || 
+                           url.startsWith('/assets/misc/') ||
+                           url.startsWith('/assets/ranks/') ||
+                           url.startsWith('/assets/weapons/') ||
+                           url.startsWith('/assets/agents/') ||
+                           url.startsWith('/assets/backgrounds/');
+    
+    // Additional checks for common team logo patterns
+    const hasTeamLogoPattern = url.includes('logo') || 
+                              url.includes('team') || 
+                              url.includes('clan') ||
+                              url.includes('org') ||
+                              url.includes('esports') ||
+                              // External URLs (not starting with /)
+                              (!url.startsWith('/') && (url.startsWith('http') || url.startsWith('//') || url.includes('.')));
+    
+    // If it's not a standard asset, it's likely a team logo
+    const isTeamLogo = !isStandardAsset || hasTeamLogoPattern;
+    
+    if (isTeamLogo) {
+      console.log(`🏷️ Detected team logo URL: ${url} (standard asset: ${isStandardAsset}, team pattern: ${hasTeamLogoPattern})`);
+    }
+    
+    return isTeamLogo;
+  }
+
   async preloadAssets(assets: MapbanFsAssets): Promise<Map<string, Uint8Array>> {
     const preloadedAssets = new Map<string, Uint8Array>();
     const assetPromises: Promise<void>[] = [];
 
     for (const [key, url] of Object.entries(assets)) {
       if (url) {
-        assetPromises.push(
-          this.preloadAsset(url)
-            .then((data) => {
-              preloadedAssets.set(url, data);
-              console.log(`✅ Preloaded asset '${key}': ${url}`);
-            })
-            .catch((error) => {
-              console.error(`❌ Failed to preload asset '${key}' (${url}):`, error);
-            })
-        );
+        // Check if this is a team logo asset that needs special processing
+        const isTeamLogoAsset = key === 'team1Logo' || key === 'team2Logo';
+        
+        if (isTeamLogoAsset) {
+          console.log(`🏷️ Preloading and resizing team logo asset '${key}': ${url}`);
+          assetPromises.push(
+            this.preloadAndProcessTeamLogo(url)
+              .then((data) => {
+                preloadedAssets.set(url, data);
+                console.log(`✅ Preloaded and resized team logo '${key}': ${url} (${data.length} bytes)`);
+              })
+              .catch((error) => {
+                console.error(`❌ Failed to preload team logo '${key}' (${url}):`, error);
+              })
+          );
+        } else {
+          // Regular asset preloading
+          assetPromises.push(
+            this.preloadAsset(url)
+              .then((data) => {
+                preloadedAssets.set(url, data);
+                console.log(`✅ Preloaded asset '${key}': ${url}`);
+              })
+              .catch((error) => {
+                console.error(`❌ Failed to preload asset '${key}' (${url}):`, error);
+              })
+          );
+        }
       }
     }
 
     await Promise.all(assetPromises);
     this.preloadedAssets = preloadedAssets;
-    console.log(`Preloaded ${preloadedAssets.size} assets`);
+    console.log(`Preloaded ${preloadedAssets.size} assets (including resized team logos)`);
     return preloadedAssets;
   }
 
@@ -144,7 +287,14 @@ export class RiveMapbanFsService {
           try {
             asset.decode(processedImageData);
             this.currentAssetUrls.set(assetName, assetUrl);
-            console.log(`✅ Loaded preloaded asset '${assetName}' from: ${assetUrl}`);
+            
+            // Check if this is a team logo asset
+            const isTeamLogoAsset = assetName === 'team1Logo' || assetName === 'team2Logo';
+            if (isTeamLogoAsset) {
+              console.log(`✅ Loaded TEAM LOGO asset '${assetName}' from: ${assetUrl} (${processedImageData.length} bytes)`);
+            } else {
+              console.log(`✅ Loaded preloaded asset '${assetName}' from: ${assetUrl}`);
+            }
             return true;
           } catch (error) {
             console.error(`Failed to decode preloaded asset ${assetName}:`, error);
@@ -153,15 +303,32 @@ export class RiveMapbanFsService {
         } else if (assetUrl) {
           // Fallback to loading if not preloaded
           console.warn(`Asset ${assetName} not preloaded, loading on demand`);
-          this.preloadAsset(assetUrl)
-            .then((processedImageData: Uint8Array) => {
-              asset.decode(processedImageData);
-              this.currentAssetUrls.set(assetName, assetUrl);
-              console.log(`✅ Loaded on-demand asset '${assetName}' from: ${assetUrl}`);
-            })
-            .catch((error: any) => {
-              console.error(`Failed to load asset ${assetName}:`, error);
-            });
+          
+          // Check if this is a team logo that needs special processing
+          const isTeamLogoAsset = assetName === 'team1Logo' || assetName === 'team2Logo';
+          
+          if (isTeamLogoAsset) {
+            console.log(`🏷️ Loading team logo asset on demand with resizing: ${assetName} -> ${assetUrl}`);
+            this.preloadAndProcessTeamLogo(assetUrl)
+              .then((processedImageData: Uint8Array) => {
+                asset.decode(processedImageData);
+                this.currentAssetUrls.set(assetName, assetUrl);
+                console.log(`✅ Loaded and resized on-demand team logo '${assetName}' from: ${assetUrl}`);
+              })
+              .catch((error: any) => {
+                console.error(`Failed to load team logo asset ${assetName}:`, error);
+              });
+          } else {
+            this.preloadAsset(assetUrl)
+              .then((processedImageData: Uint8Array) => {
+                asset.decode(processedImageData);
+                this.currentAssetUrls.set(assetName, assetUrl);
+                console.log(`✅ Loaded on-demand asset '${assetName}' from: ${assetUrl}`);
+              })
+              .catch((error: any) => {
+                console.error(`Failed to load asset ${assetName}:`, error);
+              });
+          }
           return true;
         }
         
@@ -258,34 +425,84 @@ export class RiveMapbanFsService {
           return;
         }
 
-        // Handle nested image inputs via path (e.g., "MAP 5 SCORE/team")
-        if (inputName.includes('/') && typeof value === 'string') {
-          const property = viewModelInstance.image(inputName);
-          if (property) {
+        // Check if this is a nested property path
+        if (inputName.includes('/')) {
+          // Try image property first
+          const imageProperty = viewModelInstance.image(inputName);
+          if (imageProperty && typeof value === 'string') {
             const assetRef = this.assetReferences.get(value);
             if (assetRef) {
-              property.value = assetRef;
+              imageProperty.value = assetRef;
               console.log(`✅ Set nested image property '${inputName}' to asset: ${value}`);
+              return;
             } else {
               console.warn(`Asset reference not found for '${value}'`);
+              console.log('Available asset references:', Array.from(this.assetReferences.keys()));
+              return;
             }
-          } else {
-            console.warn(`Image property not found at path: '${inputName}'`);
           }
+          
+          // Try string property
+          const stringProperty = viewModelInstance.string(inputName);
+          if (stringProperty && typeof value === 'string') {
+            stringProperty.value = value;
+            console.log(`✅ Set nested string property '${inputName}' to: ${value}`);
+            return;
+          }
+          
+          // Try boolean property
+          const boolProperty = viewModelInstance.boolean(inputName);
+          if (boolProperty && typeof value === 'boolean') {
+            boolProperty.value = value;
+            console.log(`✅ Set nested boolean property '${inputName}' to: ${value}`);
+            return;
+          }
+          
+          console.warn(`No matching nested property found at path: '${inputName}' for value type: ${typeof value}`);
+          return;
         }
-        // Handle top-level boolean inputs (e.g., "pastMap5")
-        else if (inputName.startsWith('pastMap') && typeof value === 'boolean') {
+
+        // Handle top-level properties
+        if (typeof value === 'boolean') {
           const boolInput = viewModelInstance.boolean(inputName);
           if (boolInput) {
             boolInput.value = value;
             console.log(`✅ Set boolean input '${inputName}' to: ${value}`);
+            return;
           } else {
             console.warn(`Boolean input '${inputName}' not found`);
+            return;
           }
         }
-        else {
-          console.warn(`Unsupported input type or format for '${inputName}': ${typeof value}`);
+        
+        if (typeof value === 'string') {
+          // Try string property first
+          const stringInput = viewModelInstance.string(inputName);
+          if (stringInput) {
+            stringInput.value = value;
+            console.log(`✅ Set string input '${inputName}' to: ${value}`);
+            return;
+          }
+          
+          // Try image property with asset reference
+          const imageInput = viewModelInstance.image(inputName);
+          if (imageInput) {
+            const assetRef = this.assetReferences.get(value);
+            if (assetRef) {
+              imageInput.value = assetRef;
+              console.log(`✅ Set image input '${inputName}' to asset: ${value}`);
+              return;
+            } else {
+              console.warn(`Asset reference not found for '${value}'`);
+              return;
+            }
+          }
+          
+          console.warn(`String/image input '${inputName}' not found`);
+          return;
         }
+        
+        console.warn(`Unsupported input type for '${inputName}': ${typeof value}`);
       } catch (error) {
         console.error(`Error setting data binding input '${inputName}':`, error);
       }
@@ -308,10 +525,11 @@ export class RiveMapbanFsService {
       // Determine the correct map number based on the series type and picked index
       let mapNumber: number;
       if (this.currentArtboardName === 'BO3') {
-        // BO3: MAP 5, MAP 6, MAP 7
+        // BO3: pastMap5, pastMap6, pastMap7 (maps 1-4 are bans, maps 5-7 are picks)
         mapNumber = 5 + pickedIndex;
       } else {
-        // BO5: MAP 3, MAP 4, MAP 5, MAP 6, MAP 7
+        // BO5: pastMap3, pastMap4, pastMap5 (maps 1-2 are bans, maps 3-5 are picks in first 3 matches)
+        // For BO5, the first 3 picked maps use pastMap3, pastMap4, pastMap5
         mapNumber = 3 + pickedIndex;
       }
       
@@ -328,27 +546,26 @@ export class RiveMapbanFsService {
         // Set the score text run and winning team image for the nested artboard
         if (mapState.mapScore) {
           let scoreText = '';
-          let winningTeam = '';
+          let winningTeamIndex: 0 | 1 | null = null;
           
+          // FIRST: Determine the winner from the original score data
+          winningTeamIndex = this.getWinningTeamFromScore(mapState.mapScore);
+          
+          // SECOND: Format the score display (higher score first for readability)
           if (typeof mapState.mapScore === 'string') {
             scoreText = mapState.mapScore;
-            // If it's a string, we can't determine the winner, so use team1Logo as default
-            winningTeam = 'team1Logo';
           } else if (mapState.mapScore && typeof mapState.mapScore === 'object') {
             const team1Score = mapState.mapScore.team1;
             const team2Score = mapState.mapScore.team2;
             
-            // Determine winner and format score with winning score first
+            // Format score with HIGHER score first for better readability
             if (team1Score > team2Score) {
               scoreText = `${team1Score} - ${team2Score}`;
-              winningTeam = 'team1Logo';
             } else if (team2Score > team1Score) {
               scoreText = `${team2Score} - ${team1Score}`;
-              winningTeam = 'team2Logo';
             } else {
               // Tie case - keep original order
               scoreText = `${team1Score} - ${team2Score}`;
-              winningTeam = 'team1Logo'; // Default to team1 for ties
             }
           }
           
@@ -356,11 +573,13 @@ export class RiveMapbanFsService {
             // Set the score text run on the nested artboard
             this.setNestedTextRun('Score', scoreText, artboardName);
             
-            // Set the "team" input to control which team logo to show on the nested artboard
-            const teamInputPath = `${artboardName}/team`;
-            this.setDataBindingInput(teamInputPath, winningTeam, 0);
+            // THIRD: Set the team win status based on the ORIGINAL winner determination
+            // This ensures the correct team logo is shown regardless of score display format
+            if (winningTeamIndex !== null) {
+              this.setMapTeamWin(mapNumber, winningTeamIndex);
+            }
             
-            console.log(`✅ Set score "${scoreText}" and team selector to "${winningTeam}" for ${artboardName}`);
+            console.log(`✅ Set score "${scoreText}" and team win status for map ${mapNumber} (winner: Team ${winningTeamIndex !== null ? winningTeamIndex + 1 : 'unknown'} from original data)`);
           }
         }
       } else {
@@ -413,10 +632,10 @@ export class RiveMapbanFsService {
           // Determine the correct map number for picks based on series type
           let mapNumber: number;
           if (this.currentArtboardName === 'BO3') {
-            // BO3: picked maps are 5, 6, 7
+            // BO3: picked maps are pastMap5, pastMap6, pastMap7
             mapNumber = 5 + pickedIndex;
           } else {
-            // BO5: picked maps are 3, 4, 5, 6, 7
+            // BO5: picked maps are pastMap3, pastMap4, pastMap5 (for first 3 matches)
             mapNumber = 3 + pickedIndex;
           }
           
@@ -581,7 +800,33 @@ export class RiveMapbanFsService {
   }
 
   async preloadAndProcessAsset(url: string): Promise<Uint8Array> {
-    return this.preloadAsset(url);
+    const originalData = await this.preloadAsset(url);
+    const isTeamLogo = this.isTeamLogoUrl(url);
+    
+    if (isTeamLogo) {
+      console.log(`🔧 Processing team logo: ${url}`);
+      return await this.resizeImageData(originalData, true);
+    }
+    
+    return originalData;
+  }
+
+  /**
+   * Specifically process team logos with resizing
+   * @param url - The team logo URL
+   * @returns Promise<Uint8Array> - The resized team logo data
+   */
+  async preloadAndProcessTeamLogo(url: string): Promise<Uint8Array> {
+    console.log(`🏷️ Explicitly processing team logo: ${url}`);
+    console.log(`🔍 Team logo detection for ${url}: ${this.isTeamLogoUrl(url) ? 'YES' : 'NO'}`);
+    
+    const originalData = await this.preloadAsset(url);
+    console.log(`📥 Original team logo data loaded: ${originalData.length} bytes`);
+    
+    const resizedData = await this.resizeImageData(originalData, true);
+    console.log(`📤 Team logo processing complete: ${resizedData.length} bytes (change: ${resizedData.length - originalData.length > 0 ? '+' : ''}${resizedData.length - originalData.length})`);
+    
+    return resizedData;
   }
 
   updateSponsorInfo(sponsorInfo: SponsorInfo): void {
@@ -606,28 +851,26 @@ export class RiveMapbanFsService {
       return;
     }
     
-    // Convert score to string format with winning score first
+    // FIRST: Determine the winner from the original score data
+    const winningTeamIndex = this.getWinningTeamFromScore(mapScore);
+    
+    // SECOND: Format the score display (higher score first for readability)
     let scoreText = '';
-    let winningTeam = '';
     
     if (typeof mapScore === 'string') {
       scoreText = mapScore;
-      winningTeam = 'team1Logo'; // Default for string scores
     } else if (mapScore && typeof mapScore === 'object') {
       const team1Score = mapScore.team1;
       const team2Score = mapScore.team2;
       
-      // Determine winner and format score with winning score first
+      // Format score with HIGHER score first for better readability
       if (team1Score > team2Score) {
         scoreText = `${team1Score} - ${team2Score}`;
-        winningTeam = 'team1Logo';
       } else if (team2Score > team1Score) {
         scoreText = `${team2Score} - ${team1Score}`;
-        winningTeam = 'team2Logo';
       } else {
         // Tie case - keep original order
         scoreText = `${team1Score} - ${team2Score}`;
-        winningTeam = 'team1Logo'; // Default to team1 for ties
       }
     }
     
@@ -643,15 +886,167 @@ export class RiveMapbanFsService {
         // Set the score text run on the nested artboard
         this.setNestedTextRun('Score', scoreText, artboardName);
         
-        // Set the "team" input to control which team logo to show
-        const teamInputPath = `${artboardName}/team`;
-        this.setDataBindingInput(teamInputPath, winningTeam, 0);
+        // THIRD: Set the team win status based on the ORIGINAL winner determination
+        // This ensures the correct team logo is shown regardless of score display format
+        if (winningTeamIndex !== null) {
+          this.setMapTeamWin(mapNumber, winningTeamIndex);
+        }
         
-        console.log(`✅ Set ${pastMapInputName} = true, score = "${scoreText}", and team selector = "${winningTeam}" for ${artboardName}`);
+        console.log(`✅ Set ${pastMapInputName} = true, score = "${scoreText}", and team win status for map ${mapNumber} (winner: Team ${winningTeamIndex !== null ? winningTeamIndex + 1 : 'unknown'} from original data)`);
       } else {
         console.warn(`Map number ${mapNumber} not valid (must be 3-7)`);
       }
     }
+  }
+
+  /**
+   * Sets the team win status for a past map using boolean properties
+   * 
+   * New implementation based on simplified Rive structure:
+   * - Uses single "Default" view model with boolean properties
+   * - Properties are named "map[mapNumber]Team[1-2]"
+   * - Only applies to picked maps (map numbers 3-7)
+   * - Only the WINNING team's property is set to true, losing team is set to false
+   * 
+   * @param mapNumber - The map number (3-7)
+   * @param teamWinner - The winning team index (0 = team1, 1 = team2)
+   */
+  setMapTeamWin(mapNumber: number, teamWinner: 0 | 1): void {
+    if (!this.rive) {
+      console.error('Rive not initialized');
+      return;
+    }
+
+    // Validate map number range (only picked maps 3-7)
+    if (mapNumber < 3 || mapNumber > 7) {
+      console.warn(`Map number ${mapNumber} not valid for team win (must be 3-7)`);
+      return;
+    }
+
+    try {
+      console.log(`🏆 Setting team win for map ${mapNumber}: Team ${teamWinner + 1} wins`);
+
+      // Get the view model instance
+      let viewModelInstance = this.rive.viewModelInstance;
+      if (!viewModelInstance) {
+        const viewModel = this.rive.viewModelByName('Default');
+        if (viewModel) {
+          viewModelInstance = viewModel.defaultInstance();
+          this.rive.bindViewModelInstance(viewModelInstance);
+        }
+      }
+
+      if (!viewModelInstance) {
+        console.warn('Could not get view model instance for setting team win');
+        return;
+      }
+
+      // Set boolean properties for both teams - ONLY winning team gets true
+      const team1PropertyName = `map${mapNumber}Team1`;
+      const team2PropertyName = `map${mapNumber}Team2`;
+
+      // Set team 1 boolean property - true only if team1 wins (teamWinner === 0)
+      try {
+        const team1Property = viewModelInstance.boolean(team1PropertyName);
+        if (team1Property) {
+          const team1Wins = teamWinner === 0;
+          team1Property.value = team1Wins;
+          console.log(`✅ Set ${team1PropertyName} = ${team1Wins} (Team 1 ${team1Wins ? 'WINS' : 'loses'})`);
+        } else {
+          console.warn(`❌ Could not find boolean property: ${team1PropertyName}`);
+        }
+      } catch (error) {
+        console.warn(`❌ Error setting ${team1PropertyName}:`, error);
+      }
+
+      // Set team 2 boolean property - true only if team2 wins (teamWinner === 1)
+      try {
+        const team2Property = viewModelInstance.boolean(team2PropertyName);
+        if (team2Property) {
+          const team2Wins = teamWinner === 1;
+          team2Property.value = team2Wins;
+          console.log(`✅ Set ${team2PropertyName} = ${team2Wins} (Team 2 ${team2Wins ? 'WINS' : 'loses'})`);
+        } else {
+          console.warn(`❌ Could not find boolean property: ${team2PropertyName}`);
+        }
+      } catch (error) {
+        console.warn(`❌ Error setting ${team2PropertyName}:`, error);
+      }
+
+      console.log(`🏆 Successfully set team win status for map ${mapNumber}: Team ${teamWinner + 1} wins, Team ${teamWinner === 0 ? 2 : 1} loses`);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error setting team win for map ${mapNumber}:`, errorMessage);
+    }
+  }
+
+  /**
+   * Sets the team win status for a picked map based on score data
+   * This is a wrapper method that the component can call directly
+   * 
+   * @param mapNumber - The map number (3-7) 
+   * @param mapScore - The score data
+   * @param isPastMap - Whether this is a past map (must be true to set team win)
+   */
+  setMapTeamWinFromScore(mapNumber: number, mapScore: { team1: number; team2: number } | string | null, isPastMap: boolean): void {
+    if (!isPastMap || !mapScore) {
+      console.log(`📊 Skipping team win for map ${mapNumber}: isPastMap=${isPastMap}, hasScore=${!!mapScore}`);
+      return;
+    }
+
+    const winningTeamIndex = this.getWinningTeamFromScore(mapScore);
+    if (winningTeamIndex !== null) {
+      this.setMapTeamWin(mapNumber, winningTeamIndex);
+    } else {
+      console.warn(`Could not determine winning team for map ${mapNumber} from score:`, mapScore);
+    }
+  }
+
+  /**
+   * Debug helper to understand the nested view model structure
+   */
+  /**
+   * Helper method to determine winning team from score data
+   * @param mapScore - The score object or string
+   * @returns The winning team index (0 or 1) or null if no winner can be determined
+   */
+  private getWinningTeamFromScore(mapScore: { team1: number; team2: number } | string | null): 0 | 1 | null {
+    if (!mapScore) {
+      console.log('🤔 No score data provided');
+      return null;
+    }
+
+    console.log(`🔍 Determining winner from score:`, mapScore);
+
+    if (typeof mapScore === 'string') {
+      // Parse string format like "13 - 11" to determine winner
+      const parts = mapScore.split(' - ').map(s => parseInt(s.trim()));
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        const winner = parts[0] > parts[1] ? 0 : 1; // First score higher = team1 wins (index 0)
+        console.log(`📊 String score "${mapScore}" → Team ${winner + 1} wins (${parts[0]} vs ${parts[1]})`);
+        return winner;
+      }
+      console.warn(`⚠️ Could not parse string score: "${mapScore}"`);
+      return null;
+    }
+
+    if (typeof mapScore === 'object' && mapScore.team1 !== undefined && mapScore.team2 !== undefined) {
+      let winner: 0 | 1;
+      if (mapScore.team1 > mapScore.team2) {
+        winner = 0; // team1 wins
+      } else if (mapScore.team2 > mapScore.team1) {
+        winner = 1; // team2 wins  
+      } else {
+        winner = 0; // Tie defaults to team1
+      }
+      
+      console.log(`📊 Object score {team1: ${mapScore.team1}, team2: ${mapScore.team2}} → Team ${winner + 1} wins`);
+      return winner;
+    }
+
+    console.warn(`⚠️ Unrecognized score format:`, mapScore);
+    return null;
   }
 
   resetAllPastMapInputs(): void {

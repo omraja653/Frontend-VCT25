@@ -155,28 +155,19 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     }
   }
 
-  private getRiveFileName(): string {
+  private getSeriesFormat(): 'BO1' | 'BO3' | 'BO5' {
     if (!this.data?.selectedMaps) {
-      // Default to BO3 if no data available
-      console.log('📁 No map data available, defaulting to BO3 Rive file');
-      this.isBO1Format = false;
-      return '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
+      return 'BO3'; // Default to BO3 if no data available
     }
     
     // First check if format is explicitly set in the data
     if (this.data.format) {
       if (this.data.format === 'bo1') {
-        console.log('📁 BO1 format detected - no Rive file needed, showing message instead');
-        this.isBO1Format = true;
-        return ''; // No Rive file for BO1
+        return 'BO1';
       } else if (this.data.format === 'bo5') {
-        console.log('📁 Using BO5 Rive file: mapban-fs-bo5.riv (format explicitly set to bo5)');
-        this.isBO1Format = false;
-        return '/assets/mapban/mapban-fs/mapban-fs-bo5.riv';
+        return 'BO5';
       } else if (this.data.format === 'bo3') {
-        console.log('📁 Using BO3 Rive file: mapban-fs-bo3.riv (format explicitly set to bo3)');
-        this.isBO1Format = false;
-        return '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
+        return 'BO3';
       }
     }
     
@@ -189,24 +180,29 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     const isBO1 = totalBans === 0 || this.data.selectedMaps.length <= 1;
     
     if (isBO1) {
-      console.log('📁 BO1 format detected via fallback - no Rive file needed, showing message instead');
+      return 'BO1';
+    } else if (isBO5) {
+      return 'BO5';
+    } else if (isBO3) {
+      return 'BO3';
+    } else {
+      return 'BO3'; // Default fallback
+    }
+  }
+
+  private getRiveFileName(): string {
+    const format = this.getSeriesFormat();
+    
+    if (format === 'BO1') {
+      console.log('📁 BO1 format detected - no Rive file needed, showing message instead');
       this.isBO1Format = true;
       return ''; // No Rive file for BO1
-    } else if (isBO5) {
-      console.log('📁 Using BO5 Rive file: mapban-fs-bo5.riv (2 bans detected via fallback)');
+    } else if (format === 'BO5') {
+      console.log('📁 Using BO5 Rive file: mapban-fs-bo5.riv');
       this.isBO1Format = false;
       return '/assets/mapban/mapban-fs/mapban-fs-bo5.riv';
-    } else if (isBO3) {
-      console.log('📁 Using BO3 Rive file: mapban-fs-bo3.riv (4 bans detected via fallback)');
-      this.isBO1Format = false;
-      return '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
     } else {
-      console.log('📁 Unable to determine series format, defaulting to BO3 Rive file: mapban-fs-bo3.riv');
-      console.log('📊 Format data:', {
-        explicitFormat: this.data.format,
-        totalBans,
-        totalMaps: this.data.selectedMaps.length
-      });
+      console.log('📁 Using BO3 Rive file: mapban-fs-bo3.riv');
       this.isBO1Format = false;
       return '/assets/mapban/mapban-fs/mapban-fs-bo3.riv';
     }
@@ -239,8 +235,13 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     
     console.log('🎬 Rive mapban-fs animation initialized with complete data');
     
+    // Set the artboard name in the service to match the format
+    const seriesFormat = this.getSeriesFormat();
+    this.riveService.setArtboard(seriesFormat);
+    console.log(`🎯 Set artboard format in service: ${seriesFormat}`);
+    
     // Immediately update the animation with all the data
-    this.updateRiveAnimation();
+    await this.updateRiveAnimation();
   }
 
   private async preloadAllAssets(): Promise<void> {
@@ -265,20 +266,42 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       '/assets/maps/wide/Corrode.webp'
     ];
 
-    // Add team logo URLs if available
+    // Check if we have team data available for initial preloading
     const teams = this.data?.teams || [];
-    if (teams[0]?.url) {
-      allAssetUrls.push(teams[0].url);
-    }
-    if (teams[1]?.url) {
-      allAssetUrls.push(teams[1].url);
+    const teamLogoUrls: string[] = [];
+    
+    // Only add team logos if we have team data during initial preload
+    if (teams.length > 0) {
+      console.log('🏷️ Team data available during initial preload, adding team logos...');
+      if (teams[0]?.url) {
+        allAssetUrls.push(teams[0].url);
+        teamLogoUrls.push(teams[0].url);
+      }
+      if (teams[1]?.url) {
+        allAssetUrls.push(teams[1].url);
+        teamLogoUrls.push(teams[1].url);
+      }
+      console.log('🏷️ Team logos to be processed and resized:', teamLogoUrls);
+    } else {
+      console.log('⏳ No team data available during initial preload - team logos will be processed later when data arrives');
     }
 
     const preloadPromises = allAssetUrls.map(async (url) => {
       try {
+        const isTeamLogo = teamLogoUrls.includes(url);
+        if (isTeamLogo) {
+          console.log(`🔧 Processing team logo with auto-resize: ${url}`);
+        }
+        
         const processedData = await this.riveService.preloadAndProcessAsset(url);
         this.preloadedAssets.set(url, processedData);
-        console.log(`✅ Preloaded: ${url}`);
+        
+        if (isTeamLogo) {
+          console.log(`✅ Team logo processed and resized: ${url}`);
+        } else {
+          console.log(`✅ Preloaded: ${url}`);
+        }
+        
         return { url, success: true };
       } catch (error) {
         console.warn(`❌ Failed to preload asset: ${url}`, error);
@@ -292,6 +315,56 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     
     console.log(`✅ Preloaded ${successCount}/${allAssetUrls.length} assets for mapban-fs in ${loadTime.toFixed(2)}ms`);
     this.isPreloadingComplete = true;
+  }
+
+  /**
+   * Process team logos with resizing when team data becomes available
+   * This is called when we have actual team data to work with
+   */
+  private async processTeamLogos(): Promise<void> {
+    const teams = this.data?.teams || [];
+    
+    if (teams.length === 0) {
+      console.log('⏳ No team data available for team logo processing');
+      return;
+    }
+
+    console.log('🏷️ Processing team logos with resizing now that team data is available...');
+    
+    const teamLogoPromises: Promise<void>[] = [];
+
+    // Process team 1 logo
+    if (teams[0]?.url && !this.preloadedAssets.has(teams[0].url)) {
+      console.log(`🔧 Processing Team 1 logo with auto-resize: ${teams[0].url}`);
+      teamLogoPromises.push(
+        this.riveService.preloadAndProcessTeamLogo(teams[0].url).then(processedData => {
+          this.preloadedAssets.set(teams[0].url, processedData);
+          console.log(`✅ Team 1 logo processed and resized: ${teams[0].url}`);
+        }).catch(error => {
+          console.warn(`❌ Failed to process Team 1 logo: ${teams[0].url}`, error);
+        })
+      );
+    }
+
+    // Process team 2 logo
+    if (teams[1]?.url && !this.preloadedAssets.has(teams[1].url)) {
+      console.log(`🔧 Processing Team 2 logo with auto-resize: ${teams[1].url}`);
+      teamLogoPromises.push(
+        this.riveService.preloadAndProcessTeamLogo(teams[1].url).then(processedData => {
+          this.preloadedAssets.set(teams[1].url, processedData);
+          console.log(`✅ Team 2 logo processed and resized: ${teams[1].url}`);
+        }).catch(error => {
+          console.warn(`❌ Failed to process Team 2 logo: ${teams[1].url}`, error);
+        })
+      );
+    }
+
+    if (teamLogoPromises.length > 0) {
+      await Promise.all(teamLogoPromises);
+      console.log('🏷️ All team logos processed and resized');
+    } else {
+      console.log('ℹ️ Team logos already processed or no new team logos to process');
+    }
   }
 
   private getMapImageUrls(): string[] {
@@ -541,7 +614,7 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         await this.initializeRiveWithCompleteData();
       } else {
         console.log('🔄 Updating animation with complete socket data');
-        this.updateRiveAnimation();
+        await this.updateRiveAnimation();
       }
     } else if (!this.hasSocketData) {
       console.log('⏳ Ignoring update - still waiting for socket data');
@@ -550,7 +623,7 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     }
   }
 
-  private updateRiveAnimation(): void {
+  private async updateRiveAnimation(): Promise<void> {
     if (!this.data || (!this.riveService.getRive() && !this.isBO1Format)) {
       console.log('⏸️ Skipping Rive update - missing data or Rive not initialized');
       return;
@@ -573,6 +646,9 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     }
     
     try {
+      // Process team logos with resizing now that we have team data
+      await this.processTeamLogos();
+      
       // Set team information
       this.setTeamInformation();
       
@@ -745,13 +821,12 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
           });
           
           if (isPastMap && mapScore) {
-            // Only call setPastMapScore if there's actual score data
-            this.riveService.setPastMapScore(mapNumber, mapScore, true);
-            console.log(`📊 Map ${mapNumber} (${pickedMap.name}) marked as past map with score: ${mapScore}`);
+            // Use the new boolean team win approach instead of complex nested properties
+            this.riveService.setMapTeamWinFromScore(mapNumber, mapScore, true);
+            console.log(`📊 Map ${mapNumber} (${pickedMap.name}) team win status set based on score: ${mapScore}`);
           } else {
-            // Explicitly reset pastMap to false for maps without score data
-            this.riveService.setPastMapScore(mapNumber, null, false);
-            console.log(`⏭️ Map ${mapNumber} (${pickedMap.name}) explicitly reset pastMap to false`);
+            // Explicitly reset team win status for maps without score data
+            console.log(`⏭️ Map ${mapNumber} (${pickedMap.name}) no score data available for team win`);
           }
           
           const mapState: MapState = {
@@ -799,13 +874,12 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         });
         
         if (isPastMap && mapScore) {
-          // Only call setPastMapScore if there's actual score data
-          this.riveService.setPastMapScore(7, mapScore, true);
-          console.log(`📊 Map 7 (${deciderMap.name}) marked as past map with score: ${mapScore}`);
+          // Use the new boolean team win approach for decider map
+          this.riveService.setMapTeamWinFromScore(7, mapScore, true);
+          console.log(`📊 Map 7 (${deciderMap.name}) team win status set based on score: ${mapScore}`);
         } else {
-          // Explicitly reset pastMap to false for maps without score data
-          this.riveService.setPastMapScore(7, null, false);
-          console.log(`⏭️ Map 7 (${deciderMap.name}) explicitly reset pastMap to false`);
+          // No score data available for team win
+          console.log(`⏭️ Map 7 (${deciderMap.name}) no score data available for team win`);
         }
         
         const mapState: MapState = {
@@ -889,11 +963,10 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         });
         
         if (isPastMap && mapScore) {
-          this.riveService.setPastMapScore(3, mapScore, true);
-          console.log(`📊 Map 3 (${pickedMap.name}) marked as past map with score: ${mapScore}`);
+          this.riveService.setMapTeamWinFromScore(3, mapScore, true);
+          console.log(`📊 Map 3 (${pickedMap.name}) team win status set based on score: ${mapScore}`);
         } else {
-          this.riveService.setPastMapScore(3, null, false);
-          console.log(`⏭️ Map 3 (${pickedMap.name}) explicitly reset pastMap to false`);
+          console.log(`⏭️ Map 3 (${pickedMap.name}) no score data available for team win`);
         }
         
         const mapState: MapState = {
@@ -941,11 +1014,10 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
           });
           
           if (isPastMap && mapScore) {
-            this.riveService.setPastMapScore(mapNumber, mapScore, true);
-            console.log(`📊 Map ${mapNumber} (${pickedMap.name}) marked as past map with score: ${mapScore}`);
+            this.riveService.setMapTeamWinFromScore(mapNumber, mapScore, true);
+            console.log(`📊 Map ${mapNumber} (${pickedMap.name}) team win status set based on score: ${mapScore}`);
           } else {
-            this.riveService.setPastMapScore(mapNumber, null, false);
-            console.log(`⏭️ Map ${mapNumber} (${pickedMap.name}) explicitly reset pastMap to false`);
+            console.log(`⏭️ Map ${mapNumber} (${pickedMap.name}) no score data available for team win`);
           }
           
           const mapState: MapState = {
@@ -1092,12 +1164,12 @@ export class MapbanFsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     const score1 = sessionMap.score[0];
     const score2 = sessionMap.score[1];
     
-    // Return formatted score string with higher score first
-    if (score1 > score2) {
-      return `${score1} - ${score2}`;
-    } else {
-      return `${score2} - ${score1}`;
-    }
+    // Return the original score object to preserve team identity
+    // The service will handle formatting for display while preserving winner logic
+    return {
+      team1: score1,
+      team2: score2
+    };
   }
 }
 
