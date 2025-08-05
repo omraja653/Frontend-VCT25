@@ -9,8 +9,6 @@ import { TimeoutComponent } from "./timeout/timeout.component";
 import { AgentSelectTestingComponent } from "./testing/agent-select/agent-select-testing";
 import { MapbanUiComponent } from "./mapban-ui/mapban-ui.component";
 import { MapbanFsComponent } from "./mapban-ui/mapban-fs/mapban-fs.component";
-import { MapbanTestingComponent } from "./testing/mapban/mapban-testing";
-import { MapbanFsTestingComponent } from "./testing/mapban-fs/mapban-fs-testing.component";
 
 export const routes: Routes = [
   {
@@ -84,14 +82,6 @@ export const routes: Routes = [
   {
     path: "mapban-fs",
     component: MapbanFsComponent,
-  },
-  {
-    path: "testing/mapban",
-    component: MapbanTestingComponent,
-  },
-  {
-    path: "testing/mapban-fs",
-    component: MapbanFsTestingComponent,
   },
 ];
 

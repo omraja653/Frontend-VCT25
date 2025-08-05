@@ -39,7 +39,6 @@ import { AbilitiesComponent } from "./abilities/abilities.component";
 import { UltimateComponent } from "./ultimate/ultimate.component";
 import { Agent } from "http";
 import { MapbanUiComponent } from "./mapban-ui/mapban-ui.component";
-import { MapbanTestingComponent } from "./testing/mapban/mapban-testing";
 
 @NgModule({
   declarations: [],
