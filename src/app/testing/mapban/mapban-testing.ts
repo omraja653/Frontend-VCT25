@@ -244,7 +244,7 @@ export class MapbanTestingComponent implements OnInit, AfterViewInit, OnDestroy 
 
     try {
       // Pass preloaded assets to the service
-      await this.riveService.initializeRive(canvas, assets, this.preloadedAssets);
+      await this.riveService.initializeRiveMapban(canvas, assets, undefined, this.preloadedAssets);
       
       // Set up team information in the service
       this.riveService.setTeamInfo(0, this.teams[0]);

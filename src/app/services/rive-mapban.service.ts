@@ -187,7 +187,51 @@ export class RiveMapbanService {
     return 'sponsor'; // Default
   }
 
-  initializeRive(canvas: HTMLCanvasElement, assets: MapbanAssets, preloadedAssets?: Map<string, Uint8Array>): Promise<Rive> {
+  async initializeRiveMapban(canvas: HTMLCanvasElement, assets: MapbanAssets, resizeConfig?: ResizeConfig, preloadedAssets?: Map<string, Uint8Array>): Promise<Rive> {
+    console.log('🚀 Starting Rive initialization with full asset preloading...');
+    
+    // First, ensure ALL assets are preloaded and processed before initializing Rive
+    const finalPreloadedAssets = preloadedAssets || new Map<string, Uint8Array>();
+    
+    // Collect all asset URLs that need to be preloaded
+    const assetsToPreload: Array<{ name: string, url: string }> = [];
+    Object.entries(assets).forEach(([assetName, assetUrl]) => {
+      if (assetUrl && !finalPreloadedAssets.has(assetUrl)) {
+        assetsToPreload.push({ name: assetName, url: assetUrl });
+      }
+    });
+    
+    if (assetsToPreload.length > 0) {
+      console.log(`📦 Preloading ${assetsToPreload.length} assets before Rive initialization:`, assetsToPreload.map(a => a.name));
+      
+      // Preload all assets in parallel
+      const preloadPromises = assetsToPreload.map(async ({ name, url }) => {
+        try {
+          console.log(`⏳ Preloading asset '${name}' from: ${url}`);
+          const processedData = await this.preloadAndProcessAsset(url);
+          finalPreloadedAssets.set(url, processedData);
+          console.log(`✅ Successfully preloaded and processed asset '${name}'`);
+          return { name, url, success: true };
+        } catch (error) {
+          console.error(`❌ Failed to preload asset '${name}' from ${url}:`, error);
+          return { name, url, success: false, error };
+        }
+      });
+      
+      const preloadResults = await Promise.allSettled(preloadPromises);
+      const successfulPreloads = preloadResults.filter(result => 
+        result.status === 'fulfilled' && result.value.success
+      ).length;
+      
+      console.log(`📦 Asset preloading complete: ${successfulPreloads}/${assetsToPreload.length} successful`);
+      
+      if (successfulPreloads === 0) {
+        console.warn('⚠️ No assets were successfully preloaded, but continuing with Rive initialization');
+      }
+    } else {
+      console.log('📦 All assets already preloaded, proceeding with Rive initialization');
+    }
+    
     return new Promise((resolve, reject) => {
       this.canvas = canvas;
       
@@ -199,7 +243,7 @@ export class RiveMapbanService {
       canvas.style.width = rect.width + 'px';
       canvas.style.height = rect.height + 'px';
       
-      // Create optimized asset loader using preloaded assets
+      // Create optimized asset loader using fully preloaded assets
       const assetLoader = (asset: any): boolean => {
         const assetName = asset.name;
         const assetUrl = assets[assetName as keyof MapbanAssets];
@@ -207,22 +251,22 @@ export class RiveMapbanService {
         // Store the asset reference for later dynamic updates
         this.assetReferences.set(assetName, asset);
         
-        if (assetUrl && preloadedAssets?.has(assetUrl)) {
-          // Use preloaded asset - this should be instant!
-          const processedImageData = preloadedAssets.get(assetUrl)!;
+        if (assetUrl && finalPreloadedAssets.has(assetUrl)) {
+          // Use preloaded asset - this should be instant since everything is preloaded!
+          const processedImageData = finalPreloadedAssets.get(assetUrl)!;
           try {
             asset.decode(processedImageData);
             // Track the current asset URL
             this.currentAssetUrls.set(assetName, assetUrl);
-            console.log(`✅ Loaded preloaded asset '${assetName}' from: ${assetUrl}`);
+            console.log(`✅ Loaded preloaded asset '${assetName}' instantly`);
             return true;
           } catch (error) {
-            console.error(`Failed to decode preloaded asset ${assetName}:`, error);
+            console.error(`❌ Failed to decode preloaded asset ${assetName}:`, error);
             return false;
           }
         } else if (assetUrl) {
-          // Fallback to loading if not preloaded (with proper resizing)
-          console.warn(`Asset ${assetName} not preloaded, loading on demand`);
+          // This should rarely happen now since we preload everything
+          console.warn(`⚠️ Asset ${assetName} not in preloaded cache, loading on demand (this may cause visual artifacts)`);
           this.loadAndResizeAsset(assetUrl, assetName)
             .then((processedImageData: Uint8Array) => {
               asset.decode(processedImageData);
@@ -230,15 +274,16 @@ export class RiveMapbanService {
               console.log(`✅ Loaded on-demand asset '${assetName}' from: ${assetUrl}`);
             })
             .catch((error: any) => {
-              console.error(`Failed to load and resize asset ${assetName}:`, error);
+              console.error(`❌ Failed to load and resize asset ${assetName}:`, error);
             });
           return true;
         }
         
-        console.warn(`Asset not found: ${assetName}`);
+        console.warn(`❌ Asset not found: ${assetName}`);
         return false;
       };
 
+      console.log('🎨 Initializing Rive with all assets preloaded...');
       this.rive = new Rive({
         src: '/assets/mapban/mapban.riv',
         canvas: canvas,
@@ -250,7 +295,7 @@ export class RiveMapbanService {
         autoBind: false, // Disable auto-binding so we can manually bind the "Colors" view model
         assetLoader: assetLoader,
         onLoad: () => {
-          console.log('🎨 Rive loaded with data binding enabled');
+          console.log('🎨 Rive loaded successfully with all assets preloaded - no mid-animation loading!');
           
           // Debug viewmodel information FIRST
           const viewModelInstance = this.rive!.viewModelInstance;
@@ -441,6 +486,54 @@ export class RiveMapbanService {
             } catch (error) {
               console.log('❌ Error accessing color properties:', error);
             }
+            
+            // Initialize team logos view model
+            try {
+              console.log('🏆 Initializing team logos view model...');
+              
+              let teamLogosViewModel = null;
+              try {
+                teamLogosViewModel = this.rive!.viewModelByName('teamLogos');
+                if (teamLogosViewModel) {
+                  console.log('✅ Found teamLogos view model');
+                  
+                  // Create and bind the instance
+                  const teamLogosInstance = teamLogosViewModel.defaultInstance();
+                  if (teamLogosInstance) {
+                    console.log('✅ Created teamLogos view model instance');
+                    
+                    try {
+                      this.rive!.bindViewModelInstance(teamLogosInstance);
+                      console.log('✅ Manually bound teamLogos view model instance');
+                    } catch (bindError) {
+                      console.log('❌ Could not bind teamLogos view model instance:', (bindError as Error).message);
+                    }
+                    
+                    // Test access to image properties
+                    const mapLogoProperties = ['map1Logo', 'map2Logo', 'map3Logo', 'map4Logo', 'map5Logo', 'map6Logo'];
+                    for (const propertyName of mapLogoProperties) {
+                      try {
+                        const imageProperty = teamLogosInstance.image(propertyName);
+                        if (imageProperty) {
+                          console.log(`✅ Found team logo property: ${propertyName}`);
+                        }
+                      } catch (error) {
+                        console.log(`❌ Team logo property ${propertyName} not accessible:`, (error as Error).message);
+                      }
+                    }
+                  } else {
+                    console.warn('❌ Could not create teamLogos view model instance');
+                  }
+                } else {
+                  console.warn('❌ TeamLogos view model not found');
+                }
+              } catch (error) {
+                console.error('❌ Error accessing teamLogos view model:', (error as Error).message);
+              }
+              
+            } catch (error) {
+              console.log('❌ Error initializing team logos view model:', error);
+            }
           } else {
             console.warn('❌ ViewModelInstance not available in onLoad');
           }
@@ -621,6 +714,11 @@ export class RiveMapbanService {
       this.updateMapNameText(mapNumber, mapName);
     }
     
+    // Update team logo for this map based on who acted on it
+    if (actionBy !== undefined && mapNumber >= 1 && mapNumber <= 6) {
+      this.updateMapTeamLogo(mapNumber, actionBy);
+    }
+    
     // Update Rive using correct nested artboard paths
     if (isBanned) {
       this.setRiveInput('map', mapNumber);
@@ -640,7 +738,9 @@ export class RiveMapbanService {
       this.updateVetoText(mapNumber, 'SELECT', actionBy);
       
       // Update pick text with side selection if provided
-      if (sideSelection && sideSelection.team === actionBy) {
+      // Note: The team that picks the side is OPPOSITE to the team that picked the map
+      if (sideSelection) {
+        console.log(`📝 Updating pick text for map ${mapNumber}: team ${actionBy} picked map, team ${sideSelection.team} picks ${sideSelection.side} side`);
         this.updatePickText(sideSelection.team, sideSelection.side, `Pick ${mapNumber}`);
       }
       
@@ -876,6 +976,25 @@ export class RiveMapbanService {
   }
 
   /**
+   * Set nested text run value (for text runs within nested artboards)
+   * Based on working implementation from mapban-fs service
+   */
+  setNestedTextRun(textRunName: string, value: string, path: string): void {
+    if (!this.rive) {
+      console.error('Rive not initialized');
+      return;
+    }
+
+    try {
+      // For nested text runs, use the path-based API (simplified approach like mapban-fs)
+      this.rive.setTextRunValueAtPath(textRunName, value.toUpperCase(), path);
+      console.log(`✅ Set nested text run '${textRunName}' at path '${path}' to: ${value.toUpperCase()}`);
+    } catch (error) {
+      console.error(`Error setting nested text run '${textRunName}' at path '${path}':`, error);
+    }
+  }
+
+  /**
    * Update pick animation text with team and side information
    */
   updatePickText(teamNumber: number, side: 'ATTACK' | 'DEFENSE', artboardPath: string): void {
@@ -886,11 +1005,94 @@ export class RiveMapbanService {
       const teamTricode = team ? team.tricode : 'TEAM';
       const textValue = `${teamTricode} PICKS\n${side}`;
       
-      // Set text in the nested artboard
-      this.rive.setTextRunValueAtPath('PICK', textValue, artboardPath);
-      console.log(`Updated pick text in '${artboardPath}' to: ${textValue}`);
+      console.log(`📝 Updating PICK text for team ${teamNumber} (${teamTricode}) picking ${side} in artboard: ${artboardPath}`);
+      
+      // Use the new setNestedTextRun method based on mapban-fs pattern
+      this.setNestedTextRun('PICK', textValue, artboardPath);
+      
     } catch (error) {
       console.error(`Error updating pick text in ${artboardPath}:`, error);
+    }
+  }
+
+  /**
+   * Manually set team logos for specific maps (useful for initialization)
+   */
+  setTeamLogosForMaps(teamLogos: { mapNumber: number, teamNumber: number }[]): void {
+    console.log('🏆 Setting team logos for maps:', teamLogos);
+    
+    teamLogos.forEach(({ mapNumber, teamNumber }) => {
+      if (mapNumber >= 1 && mapNumber <= 6) {
+        this.updateMapTeamLogo(mapNumber, teamNumber);
+      }
+    });
+  }
+
+  /**
+   * Update team logo for a specific map in the teamLogos view model
+   */
+  updateMapTeamLogo(mapNumber: number, teamNumber: number): void {
+    if (!this.rive) return;
+    
+    // Only update logos for maps 1-6 as specified
+    if (mapNumber < 1 || mapNumber > 6) {
+      console.warn(`Map number ${mapNumber} is out of range for team logo assignment (1-6)`);
+      return;
+    }
+    
+    try {
+      // Access the teamLogos view model
+      let teamLogosViewModel = null;
+      try {
+        teamLogosViewModel = this.rive.viewModelByName('teamLogos');
+        if (!teamLogosViewModel) {
+          console.warn('TeamLogos view model not found');
+          return;
+        }
+      } catch (error) {
+        console.error('Error accessing teamLogos view model:', error);
+        return;
+      }
+      
+      // Create or get the view model instance
+      let teamLogosInstance = null;
+      try {
+        teamLogosInstance = teamLogosViewModel.defaultInstance();
+        if (!teamLogosInstance) {
+          console.warn('Could not create teamLogos view model instance');
+          return;
+        }
+      } catch (error) {
+        console.error('Error creating teamLogos view model instance:', error);
+        return;
+      }
+      
+      // Determine which asset to use based on team number
+      const assetName = teamNumber === 0 ? 't1_logo' : 't2_logo';
+      const logoPropertyName = `map${mapNumber}Logo`;
+      
+      try {
+        // Get the image property for this map
+        const imageProperty = teamLogosInstance.image(logoPropertyName);
+        if (imageProperty) {
+          // Get the asset reference for the team logo
+          const assetRef = this.assetReferences.get(assetName);
+          if (assetRef) {
+            // Assign the team logo asset to this map's logo property
+            imageProperty.value = assetRef;
+            console.log(`✅ Set ${logoPropertyName} to ${assetName} for team ${teamNumber}`);
+          } else {
+            console.warn(`Asset reference for ${assetName} not found`);
+          }
+        } else {
+          console.warn(`Image property ${logoPropertyName} not found in teamLogos view model`);
+        }
+      } catch (error) {
+        console.error(`Error setting image property ${logoPropertyName}:`, error);
+      }
+      
+    } catch (error) {
+      console.error(`Error updating team logo for map ${mapNumber}:`, error);
     }
   }
 

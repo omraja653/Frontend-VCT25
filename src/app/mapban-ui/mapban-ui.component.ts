@@ -47,7 +47,10 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
   private isPreloadingComplete = false;
   
   // Match data for assets
-  private match: any = null;
+  private match: any = null;  
+  // Track Rive initialization status
+  private isRiveInitialized = false;
+  private pendingDataUpdate: { data: ISessionData } | null = null;
 
   constructor() {
     const params = this.route.snapshot.queryParams;
@@ -94,13 +97,22 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       const assets = this.buildMapbanAssets();
       
       // Initialize Rive with preloaded assets
-      await this.riveService.initializeRive(
+      await this.riveService.initializeRiveMapban(
         this.riveCanvas.nativeElement,
         assets,
+        undefined,
         this.preloadedAssets
       );
       
       console.log('🎬 Rive mapban animation initialized');
+      this.isRiveInitialized = true;
+      
+      // Process any pending data updates
+      if (this.pendingDataUpdate) {
+        console.log('🔄 Processing pending data update after Rive initialization');
+        this.updateMapbanData(this.pendingDataUpdate);
+        this.pendingDataUpdate = null;
+      }
     } catch (error) {
       console.error('Failed to initialize Rive mapban animation:', error);
     }
@@ -132,7 +144,7 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       assetsToPreload.push(tournamentLogoUrl);
     }
     
-    // Add map images
+    // Add map images - comprehensive list to cover all possible maps
     const mapAssets = [
       '/assets/maps/wide/Ascent.webp',
       '/assets/maps/wide/Bind.webp',
@@ -140,7 +152,12 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       '/assets/maps/wide/Split.webp',
       '/assets/maps/wide/Lotus.webp',
       '/assets/maps/wide/Sunset.webp',
-      '/assets/maps/wide/Icebox.webp'
+      '/assets/maps/wide/Icebox.webp',
+      '/assets/maps/wide/Breeze.webp',
+      '/assets/maps/wide/Fracture.webp',
+      '/assets/maps/wide/Pearl.webp',
+      '/assets/maps/wide/Abyss.webp',
+      '/assets/maps/wide/Corrode.webp'
     ];
     assetsToPreload.push(...mapAssets);
     
@@ -172,7 +189,7 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       // Sponsor (can use tournament logo or default)
       sponsor: this.getProxiedImageUrl(this.match?.tools?.tournamentInfo?.logoUrl) || '/assets/misc/icon.webp',
       
-      // Map assets (these will be set dynamically based on available maps)
+      // Start with default map assets
       map_1: '/assets/maps/wide/Ascent.webp',
       map_2: '/assets/maps/wide/Bind.webp',
       map_3: '/assets/maps/wide/Haven.webp',
@@ -181,6 +198,52 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
       map_6: '/assets/maps/wide/Sunset.webp',
       map_7: '/assets/maps/wide/Icebox.webp'
     };
+
+    // Only build dynamic map assets if we have selectedMaps data with valid names
+    if (!this.data?.selectedMaps || this.data.selectedMaps.length === 0) {
+      console.log('⚠️ No selectedMaps data available, using default map assets');
+      return assets;
+    }
+
+    // Filter out maps that don't have valid names
+    const validMaps = this.data.selectedMaps.filter(map => 
+      map && map.name && typeof map.name === 'string' && map.name.trim() !== ''
+    );
+    
+    if (validMaps.length === 0) {
+      console.log('⚠️ No maps with valid names found, using default map assets');
+      return assets;
+    }
+
+    console.log('🗺️ Building dynamic map assets from selectedMaps:', validMaps.map(map => ({
+      name: map.name,
+      bannedBy: map.bannedBy,
+      pickedBy: map.pickedBy
+    })));
+
+    // For mapban-ui, we use a different order than mapban-fs
+    // This component has its own layout structure, so we assign maps sequentially
+    // based on the chronological order from selectedMaps
+    validMaps.forEach((map, index) => {
+      if (map.name && index < 7) { // Only process up to 7 maps
+        const mapKey = `map_${index + 1}` as keyof MapbanAssets;
+        assets[mapKey] = `/assets/maps/wide/${map.name}.webp`;
+        console.log(`🗺️ Map ${index + 1}: ${map.name} -> ${assets[mapKey]} (${map.bannedBy !== undefined ? 'banned' : map.pickedBy !== undefined ? 'picked' : 'neutral'})`);
+      }
+    });
+
+    console.log('✅ Dynamic map assets built for mapban-ui:', {
+      totalValidMaps: validMaps.length,
+      mapAssets: {
+        map_1: assets.map_1,
+        map_2: assets.map_2,
+        map_3: assets.map_3,
+        map_4: assets.map_4,
+        map_5: assets.map_5,
+        map_6: assets.map_6,
+        map_7: assets.map_7
+      }
+    });
     
     return assets;
   }
@@ -203,14 +266,37 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
 
   public updateMapbanData(data: { data: ISessionData }): void {
     this.data = data.data;
-    console.log('Mapban data updated:', this.data);
+    console.log('🔄 Mapban data updated:', this.data);
+    
+    // Check if Rive is initialized before updating animation
+    if (!this.isRiveInitialized) {
+      console.log('⏳ Rive not initialized yet, storing data for later processing');
+      this.pendingDataUpdate = data;
+      return;
+    }
     
     // Update Rive animation based on the data
     this.updateRiveAnimation();
   }
 
   private updateRiveAnimation(): void {
-    if (!this.data || !this.riveService.getRive()) return;
+    if (!this.data) {
+      console.log('⏸️ No data available for Rive animation update');
+      return;
+    }
+
+    if (!this.riveService.getRive()) {
+      console.log('⚠️ Rive service not available, skipping update');
+      return;
+    }
+
+    console.log('🎬 Updating Rive animation with data:', {
+      hasTeams: !!this.data.teams,
+      teamCount: this.data.teams?.length || 0,
+      hasSelectedMaps: !!this.data.selectedMaps,
+      selectedMapsCount: this.data.selectedMaps?.length || 0,
+      format: this.data.format
+    });
     
     // Set team information
     if (this.data.teams) {
@@ -220,11 +306,21 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
           name: this.data.teams[i].name || 'Team Name'
         };
         this.riveService.setTeamInfo(i, teamInfo);
+        console.log(`👥 Set team ${i} info:`, teamInfo);
       }
     }
     
     // Process map states from selected maps
     if (this.data.selectedMaps) {
+      console.log('🗺️ Processing selectedMaps:', this.data.selectedMaps.map((map, idx) => ({
+        index: idx,
+        name: map.name,
+        bannedBy: map.bannedBy,
+        pickedBy: map.pickedBy,
+        sidePickedBy: map.sidePickedBy,
+        pickedAttack: map.pickedAttack
+      })));
+
       const mapStates: MapState[] = [];
       
       this.data.selectedMaps.forEach((sessionMap, index) => {
@@ -238,18 +334,23 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         };
         
         mapStates.push(mapState);
+        console.log(`🗺️ Map ${mapNumber}: ${sessionMap.name || 'No name'} - ${mapState.isBanned ? 'BANNED' : mapState.isPicked ? 'PICKED' : 'NEUTRAL'}`);
         
-        // Update map name text
+        // Update map name text for each map
         if (sessionMap.name && sessionMap.name !== '' && sessionMap.name !== 'upcoming') {
+          console.log(`📝 Updating map ${mapNumber} text to: ${sessionMap.name}`);
           this.riveService.updateMapNameText(mapNumber, sessionMap.name);
         }
         
-        // Handle side selection for picks
+        // Handle map status updates
         if (sessionMap.pickedBy !== undefined && sessionMap.sidePickedBy !== undefined) {
           const sideSelection: SideSelection = {
-            team: sessionMap.pickedBy,
+            team: sessionMap.sidePickedBy, // The team that picks the side (should be opposite to the team that picked the map)
             side: sessionMap.pickedAttack === true ? 'ATTACK' : 'DEFENSE'
           };
+          
+          console.log(`⚔️ Map ${mapNumber} picked by team ${sessionMap.pickedBy}, side picked by team ${sessionMap.sidePickedBy}: ${sideSelection.side}`);
+          console.log(`🔍 Side selection validation: pickedBy=${sessionMap.pickedBy}, sidePickedBy=${sessionMap.sidePickedBy}, should be opposite=${sessionMap.pickedBy !== sessionMap.sidePickedBy ? 'YES' : 'NO'}`);
           
           this.riveService.updateMapStatus(
             mapNumber,
@@ -260,6 +361,7 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
             sideSelection
           );
         } else if (sessionMap.bannedBy !== undefined) {
+          console.log(`🚫 Map ${mapNumber} banned by team ${sessionMap.bannedBy}`);
           this.riveService.updateMapStatus(
             mapNumber,
             true,
@@ -268,15 +370,38 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
             sessionMap.name
           );
         } else if (sessionMap.pickedBy !== undefined) {
+          // Map was picked but no side has been selected yet
+          // For display purposes, assume the opposite team will pick the side
+          const oppositeSideTeam = sessionMap.pickedBy === 0 ? 1 : 0;
+          
+          // Check if sidePickedBy exists but is being processed separately
+          const actualSidePickingTeam = sessionMap.sidePickedBy !== undefined ? sessionMap.sidePickedBy : oppositeSideTeam;
+          const actualSide = sessionMap.pickedAttack !== undefined ? (sessionMap.pickedAttack ? 'ATTACK' : 'DEFENSE') : 'ATTACK';
+          
+          const defaultSideSelection: SideSelection = {
+            team: actualSidePickingTeam,
+            side: actualSide
+          };
+          
+          console.log(`✅ Map ${mapNumber} picked by team ${sessionMap.pickedBy}`);
+          console.log(`🔍 Side assignment: sidePickedBy=${sessionMap.sidePickedBy}, calculated opposite=${oppositeSideTeam}, using=${actualSidePickingTeam}, side=${actualSide}`);
+          
           this.riveService.updateMapStatus(
             mapNumber,
             false,
             true,
             sessionMap.pickedBy,
-            sessionMap.name
+            sessionMap.name,
+            defaultSideSelection
           );
         }
       });
+      
+      // Update all map states at once
+      console.log(`📊 Updating Rive with ${mapStates.length} map states:`, mapStates);
+      this.riveService.updateMapStates(mapStates);
+      
+      console.log(`📊 Map states summary: ${mapStates.length} total maps, ${mapStates.filter(m => m.isBanned).length} banned, ${mapStates.filter(m => m.isPicked).length} picked`);
       
       // Check if there's a decider map (last map that's neither banned nor picked)
       const availableMapCount = this.data.availableMaps?.length || 7;
@@ -287,20 +412,50 @@ export class MapbanUiComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         // Find the remaining map and set it as decider
         const deciderMapIndex = mapStates.findIndex(m => !m.isBanned && !m.isPicked);
         if (deciderMapIndex !== -1) {
-          const deciderMapName = this.data.selectedMaps[deciderMapIndex]?.name;
-          this.riveService.setDeciderMap(deciderMapIndex + 1, deciderMapName);
+          const deciderMapData = this.data.selectedMaps[deciderMapIndex];
+          const deciderMapName = deciderMapData?.name;
+          console.log(`🎯 Setting decider map: ${deciderMapName} at position ${deciderMapIndex + 1}`);
+          
+          // Check if someone picked a side on the decider map
+          if (deciderMapData?.sidePickedBy !== undefined) {
+            const sideSelection: SideSelection = {
+              team: deciderMapData.sidePickedBy,
+              side: deciderMapData.pickedAttack === true ? 'ATTACK' : 'DEFENSE'
+            };
+            
+            console.log(`⚔️ Decider map (${deciderMapIndex + 1}) side picked by team ${deciderMapData.sidePickedBy}: ${sideSelection.side}`);
+            
+            // First set as decider map (this sets "DECIDER MAP" text)
+            this.riveService.setDeciderMap(deciderMapIndex + 1, deciderMapName);
+            
+            // Then update the pick text to show side selection
+            this.riveService.updatePickText(
+              deciderMapData.sidePickedBy,
+              sideSelection.side,
+              `Pick ${deciderMapIndex + 1}`
+            );
+            
+            // Trigger the pick animation for the decider map
+            this.riveService.setRiveInput('isPicked', true, `Pick ${deciderMapIndex + 1}`);
+          } else {
+            // No side picked yet, just set as decider
+            this.riveService.setDeciderMap(deciderMapIndex + 1, deciderMapName);
+          }
         }
       }
     }
     
     // Update sponsor information if available
     if (this.match?.tools?.sponsorInfo) {
+      console.log('📢 Updating sponsor info:', this.match.tools.sponsorInfo);
       this.riveService.updateSponsorInfo(this.match.tools.sponsorInfo);
     }
     
     // Update assets if they've changed
+    console.log('🔄 Updating assets from preloaded cache...');
     const newAssets = this.buildMapbanAssets();
     this.riveService.updateAssetsFromPreloaded(newAssets, this.preloadedAssets);
+    console.log('✅ Assets update completed');
   }
 }
 
