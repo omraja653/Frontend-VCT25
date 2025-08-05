@@ -17,6 +17,9 @@ export class Config {
   mapbanPrimaryColor = "#80152D";
   mapbanSecondaryColor = "#1C8C74";
 
+  endroundColor = "#0A0C14";
+  endroundTextColor = "#FFFFFF";
+
   showEventName = false;
   eventName = "Spectra Invitational 2025";
 

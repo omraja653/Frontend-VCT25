@@ -12,6 +12,8 @@
   "defenderColorPrimary": "#25ac79",
   "defenderColorSecondary": "#61eab6",
   "defenderColorShieldCurrency": "#61eab6",
+  "endroundColor": "#0A0C14",
+  "endroundTextColor": "#FFFFFF",
   "showEventName": false,
   "eventName": "Spectra Invitational 2025"
 }
