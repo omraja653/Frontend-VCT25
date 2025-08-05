@@ -130,6 +130,11 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
   private riveInitialized = false;
   private imagesToPreload: string[] = [];
   private canvasElement: HTMLCanvasElement | null = null;
+  
+  // Asset loading tracking
+  private assetsToLoad = new Set<string>();
+  private assetsLoaded = new Set<string>();
+  private allAssetsLoaded = false;
 
   constructor(private route: ActivatedRoute, private config: Config) {
     this.route.queryParams.subscribe((params) => {
@@ -242,6 +247,74 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
     return Promise.all(promises);
   }
 
+  private markAssetAsLoaded(assetName: string): void {
+    this.assetsLoaded.add(assetName);
+    console.log(`✅ Asset loaded: ${assetName} (${this.assetsLoaded.size}/${this.assetsToLoad.size})`);
+    
+    if (this.assetsLoaded.size === this.assetsToLoad.size && !this.allAssetsLoaded) {
+      this.allAssetsLoaded = true;
+      console.log("🎉 All Rive assets loaded! Starting animation playback.");
+      this.startRivePlayback();
+    }
+  }
+
+  private startRivePlayback(): void {
+    if (!this.riveInstance || !this.canvasElement) {
+      console.error("Cannot start playback: Rive instance or canvas not available");
+      return;
+    }
+
+    // Make canvas visible and start playback
+    this.canvasElement.style.visibility = 'visible';
+    
+    // Defer play to the next animation frame to ensure all assets are rendered
+    requestAnimationFrame(() => {
+      if (this.riveInstance) {
+        console.log("🎬 Playing Rive animation with all assets loaded.");
+        this.riveInstance.play();
+        this.riveInitialized = true;
+      }
+    });
+  }
+
+  private populateExpectedAssets(): void {
+    // Add expected assets based on current match data
+    const teams = this.match?.teams || [];
+    
+    // Player agent portraits and roles
+    teams.forEach((team: any, teamIndex: number) => {
+      if (team.players) {
+        team.players.forEach((player: any, playerIndex: number) => {
+          if (player?.agentInternal) {
+            const side = teamIndex === 0 ? 'L' : 'R';
+            this.assetsToLoad.add(`${side}${playerIndex + 1}_agent`);
+            this.assetsToLoad.add(`${side}${playerIndex + 1}_role`);
+          }
+        });
+      }
+    });
+    
+    // Team logos
+    this.assetsToLoad.add('leftTeamLogo');
+    this.assetsToLoad.add('rightTeamLogo');
+    
+    // Map image
+    if (this.match?.map) {
+      this.assetsToLoad.add('img_14');
+    }
+    
+    // Event logo
+    this.assetsToLoad.add('eventLogo');
+    
+    // Static assets
+    this.assetsToLoad.add('img_13');
+    
+    // Font assets
+    this.assetsToLoad.add('Noto Sans Mono');
+    
+    console.log(`📋 Expecting ${this.assetsToLoad.size} assets to load:`, Array.from(this.assetsToLoad));
+  }
+
   public updateMatch(data: any) {
     delete data.eventNumber;
     delete data.replayLog;
@@ -333,6 +406,14 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
+    // Reset asset tracking for new initialization
+    this.assetsToLoad.clear();
+    this.assetsLoaded.clear();
+    this.allAssetsLoaded = false;
+
+    // Pre-populate expected assets based on current match data
+    this.populateExpectedAssets();
+
     // Determine the best font for "Noto Sans Mono" based on player names
     let finalFontUrlForNotoSansMono = "/assets/fonts/NotoSansMono/NotoSansMono-Bold.ttf"; // Default
     const playerNames: string[] = [];
@@ -415,12 +496,20 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
           if (player?.agentInternal) {
             if (asset.name.includes("agent")) {
               const url = `/assets/agent-portraits/${player.agentInternal}Portrait.webp`;
-              return loadAndDecodeImageHelper(asset, url); 
+              const result = await loadAndDecodeImageHelper(asset, url);
+              if (result) {
+                this.markAssetAsLoaded(asset.name);
+              }
+              return result; 
             } else { // role
               const role = AgentRoleService.getAgentRole(player.agentInternal);
               if (role) {
                 const url = `/assets/roles/${role}.webp`;
-                return loadAndDecodeImageHelper(asset, url); 
+                const result = await loadAndDecodeImageHelper(asset, url);
+                if (result) {
+                  this.markAssetAsLoaded(asset.name);
+                }
+                return result; 
               } else {
                 console.warn(`Role not found for agent ${player.agentInternal} for Rive asset '${asset.name}'. Cannot load.`);
                 return false;
@@ -435,13 +524,21 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
         if (asset.isImage && asset.name === "leftTeamLogo") {
           let url = this.match?.teams?.[0]?.teamUrl || "../../assets/misc/icon.webp";
           if (/^https?:\/\//.test(url) && !url.startsWith('/proxy-image')) url = `/proxy-image?url=${encodeURIComponent(url)}`;
-          return loadAndDecodeImageHelper(asset, url, this.logoWidth, this.logoHeight);
+          const result = await loadAndDecodeImageHelper(asset, url, this.logoWidth, this.logoHeight);
+          if (result) {
+            this.markAssetAsLoaded(asset.name);
+          }
+          return result;
         }
 
         if (asset.isImage && asset.name === "rightTeamLogo") {
           let url = this.match?.teams?.[1]?.teamUrl || "../../assets/misc/icon.webp";
           if (/^https?:\/\//.test(url) && !url.startsWith('/proxy-image')) url = `/proxy-image?url=${encodeURIComponent(url)}`;
-          return loadAndDecodeImageHelper(asset, url, this.logoWidth, this.logoHeight);
+          const result = await loadAndDecodeImageHelper(asset, url, this.logoWidth, this.logoHeight);
+          if (result) {
+            this.markAssetAsLoaded(asset.name);
+          }
+          return result;
         }
 
         if (asset.isImage && asset.name === "img_14") { // Map image
@@ -451,7 +548,11 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
             return false;
           }
           const url = `/assets/maps/agent-select/${mapName}.webp`;
-          return loadAndDecodeImageHelper(asset, url);
+          const result = await loadAndDecodeImageHelper(asset, url);
+          if (result) {
+            this.markAssetAsLoaded(asset.name);
+          }
+          return result;
         }
 
         if (asset.isImage && asset.name === "eventLogo") {
@@ -459,7 +560,11 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
               ? this.match.tools.tournamentInfo.logoUrl
               : "../../assets/misc/logo.webp"; 
           if (/^https?:\/\//.test(url) && !url.startsWith('/proxy-image')) url = `/proxy-image?url=${encodeURIComponent(url)}`;
-          return loadAndDecodeImageHelper(asset, url, 1200, 1200);
+          const result = await loadAndDecodeImageHelper(asset, url, 1200, 1200);
+          if (result) {
+            this.markAssetAsLoaded(asset.name);
+          }
+          return result;
         }
         
         if (asset.isFont) {
@@ -484,6 +589,7 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
               }
               const fontBuffer = await response.arrayBuffer();
               (asset as FontAsset).decode(new Uint8Array(fontBuffer));
+              this.markAssetAsLoaded(asset.name);
               return true;
             } catch (e) {
               console.error(`Failed to load or decode font for Rive asset '${asset.name}' from '${fontUrlToLoad}'`, e);
@@ -497,7 +603,11 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
 
         if (asset.isImage && asset.name === "img_13") {
           const url = "/assets/agentSelect/img_13-3594105.png";
-          return loadAndDecodeImageHelper(asset, url);
+          const result = await loadAndDecodeImageHelper(asset, url);
+          if (result) {
+            this.markAssetAsLoaded(asset.name);
+          }
+          return result;
         }
 
         console.warn(`Asset '${asset.name}' (type: ${asset.constructor.name}) not handled by assetLoader.`);
@@ -533,17 +643,13 @@ export class AgentSelectComponent implements OnInit, AfterViewInit, OnDestroy {
         console.log("Rive animation loaded. Setting initial texts.");
         this.updateRiveTextsAndInputs(); // Set initial texts and inputs
 
-        // Make canvas visible *after* text is set
-        this.canvasElement.style.visibility = 'visible';
-        
-        // Defer play to the next animation frame to ensure text is rendered
-        requestAnimationFrame(() => {
-            if (this.riveInstance) { // Re-check instance in case of component destruction
-                console.log("Playing Rive animation in next frame.");
-                this.riveInstance.play();
-                this.riveInitialized = true; // Mark as initialized when play is actually called
-            }
-        });
+        // Check if all assets are already loaded, otherwise wait for them
+        if (this.allAssetsLoaded) {
+          this.startRivePlayback();
+        } else {
+          console.log("⏳ Waiting for all assets to load before starting animation...");
+          // Canvas remains hidden until all assets are loaded
+        }
       },
       onError: (error: any) => {
         console.error("Rive load error:", error);
