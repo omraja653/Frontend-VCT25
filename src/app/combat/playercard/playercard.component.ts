@@ -128,7 +128,7 @@ export class InhouseTrackerPlayercardComponent {
   }
 
   get spectatorBoxWidth() {
-    return this.player?.isObserved ? 25 : 0;
+    return this.player?.isObserved ? 35 : 0;
   }
 
   get player() {
