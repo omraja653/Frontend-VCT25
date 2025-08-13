@@ -179,6 +179,7 @@
           <div
             class="currency-container"
             [class]="side"
+            *ngIf="!match.showAliveKDA || !player.isAlive"
             [@creditsDeathAnimation]="!player.isAlive"
             [style.transform]="!player.isAlive ? 'translateY(52px) translateX(-140px)' : 'none'"
           >
@@ -207,6 +208,23 @@
           
         >
           {{ player.money }}
+        </div>
+      </div>
+      <div
+        class="alive-kda-container"
+        [class]="side"
+        *ngIf="match.showAliveKDA && player.isAlive"
+        [@creditsDeathAnimation]="!player.isAlive"
+        [style.transform]="!player.isAlive ? 'translateY(52px) translateX(-140px)' : 'none'"
+      >
+        <div
+          class="alive-kda-text"
+          [class]="color"
+          [ngStyle]="{
+            transform: (side === 'right' ? 'scaleX(-1)' : '')
+        }"
+        >
+          {{ player.kills }} / {{ player.deaths }}<span *ngIf="showAssistCounts"> / {{ player.assists }}</span>
         </div>
       </div>
       <div 

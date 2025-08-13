@@ -56,6 +56,7 @@ export class TestingComponent implements AfterViewInit {
         next: (data: any) => {
           this.previewMatch = data;
           this.matchData = this.previewMatch;
+          this.matchData.showAliveKDA = false; // Initialize for preview matches
           console.log("Preview match data loaded:", this.matchData);
           this.team2.swapColor();
           this.trackerComponent.updateMatch(this.matchData);
@@ -80,6 +81,7 @@ export class TestingComponent implements AfterViewInit {
       this.matchData.teams[1] = this.team2.getData();
 
       this.matchData.switchRound = 13;
+      this.matchData.showAliveKDA = false; // Initialize the showAliveKDA property
 
       this.matchData.teams[0].roundRecord = [
         { type: "detonated", wasAttack: true, round: 1 },
@@ -243,5 +245,10 @@ export class TestingComponent implements AfterViewInit {
     if (this.isSpikePlanted && (this.backgroundClassId == 1 || this.backgroundClassId == 3)) {
       this.switchBackground();
     }
+  }
+
+  toggleAliveKDA(): void {
+    this.matchData.showAliveKDA = !this.matchData.showAliveKDA;
+    this.pushUpdatesToTracker();
   }
 }
