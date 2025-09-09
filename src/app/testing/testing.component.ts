@@ -160,8 +160,19 @@ export class TestingComponent implements AfterViewInit {
         },
         watermarkInfo: {
           spectraWatermark: true,
-          customTextEnabled: true,
-          customText: "SPECTRA INVITATIONAL",
+          customTextEnabled: false,
+          customText: "This is a tournament",
+        },
+        playercamsInfo: {
+          enable: true,
+          identifier: "SPPCDEBUG",
+          enabledPlayers: ["VoodooOne#DEBUG", "AlpacaHoarder#DEBUG"],
+        },
+        nameOverrides: {
+          overrides: new Map<string, string>([
+            ["VoodooOne#DEBUG", "Voodoo One"],
+            ["AlpacaHoarder#DEBUG", "AlpacaHoarder"],
+          ]),
         },
       };
 
@@ -171,8 +182,8 @@ export class TestingComponent implements AfterViewInit {
         this.team1.addPlayer();
         this.team2.addPlayer();
       }
-
       this.roundPhase = this.matchData.roundPhase;
+      this.changeRoundPhase();
     }
     this.pushUpdatesToTracker();
   }
@@ -183,7 +194,7 @@ export class TestingComponent implements AfterViewInit {
     } else if (this.matchData.roundPhase == "combat") {
       this.matchData.roundPhase = "end";
     } else if (this.matchData.roundPhase == "LOBBY") {
-      this.matchData.roundPhase = "end";
+      this.matchData.roundPhase = "combat";
     } else {
       this.matchData.roundPhase = "shopping";
     }

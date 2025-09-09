@@ -2,11 +2,11 @@ import { NgModule } from "@angular/core";
 import { RouterModule, Routes } from "@angular/router";
 import { TestingComponent } from "./testing/testing.component";
 import { OverlayComponent } from "./overlay/overlay.component";
-import { AgentSelectComponent } from "./agent-select/agent-select.component";
+import { AgentSelectRouterComponent } from "./agent-select/agent-select-router.component";
 import { AutoswitchComponent } from "./autoswitch/autoswitch.component";
 import { RedirectComponent } from "./redirect/redirect.component";
 import { TimeoutComponent } from "./timeout/timeout.component";
-import { AgentSelectTestingComponent } from "./testing/agent-select/agent-select-testing";
+import { AgentSelectTestingRouterComponent } from "./testing/agent-select/agent-select-testing-router.component";
 import { MapbanUiComponent } from "./mapban-ui/mapban-ui.component";
 import { MapbanFsComponent } from "./mapban-ui/mapban-fs/mapban-fs.component";
 
@@ -49,7 +49,7 @@ export const routes: Routes = [
   },
   {
     path: "agent-select",
-    component: AgentSelectComponent,
+    component: AgentSelectRouterComponent,
   },
   {
     path: "autoswitch",
@@ -73,7 +73,7 @@ export const routes: Routes = [
   },
   {
     path: "testing/agent-select",
-    component: AgentSelectTestingComponent,
+    component: AgentSelectTestingRouterComponent,
   },
   {
     path: "mapban",
