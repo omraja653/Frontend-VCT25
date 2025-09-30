@@ -1,6 +1,6 @@
 {
     "apps": [{
-        "name": "Spectra Frontend",
+        "name": "drawfive Frontend",
         "cwd": "./",
         "script": "./server.js",
         "log_date_format": "YYYY-MM-DD HH:mm Z"
