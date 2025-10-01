@@ -1,5 +1,5 @@
 {
-  "serverEndpoint": "http://server:5100 ",
+  "serverEndpoint": "http://16.171.18.43:5100",
   "redirectUrl": "https://nobii.dev/src/landing",
   "sponsorImageUrls": [
     "/assets/misc/logo.webp"
