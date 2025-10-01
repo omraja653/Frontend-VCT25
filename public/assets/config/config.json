@@ -1,5 +1,5 @@
 {
-  "serverEndpoint": "https://drawfiveserver-qcwy.onrender.com",
+  "serverEndpoint": "http://localhost:5100/",
   "redirectUrl": "https://nobii.dev/src/landing",
   "sponsorImageUrls": [
     "/assets/misc/logo.webp"
